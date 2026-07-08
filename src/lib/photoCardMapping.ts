@@ -1,5 +1,6 @@
 import type { Card } from '../types/poker'
-import { normalizeCardFromAi } from './pokerEval'
+import { normalizeCardFromAi, formatCardDisplay } from './pokerEval'
+import { cardIdentity } from './handValidation'
 import type { PhotoReadContext } from './geminiService'
 
 export interface ParsedPhotoCards {
@@ -7,6 +8,78 @@ export interface ParsedPhotoCards {
   playerCards: Card[]
   /** Flat list for legacy array responses (dealer first, then player L→R). */
   flat: Card[]
+}
+
+function dedupeCards(cards: Card[]): Card[] {
+  const seen = new Set<string>()
+  return cards.filter(c => {
+    const id = cardIdentity(c)
+    if (seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+}
+
+function stripTableDuplicates(dealerUp: Card | null, playerCards: Card[]): Card[] {
+  const withoutDupes = dedupeCards(playerCards)
+  if (!dealerUp) return withoutDupes
+  const upId = cardIdentity(dealerUp)
+  return withoutDupes.filter(c => cardIdentity(c) !== upId)
+}
+
+function tableIdentities(existing: Record<string, Card | null>, excludeSlotIds: string[] = []): Set<string> {
+  const exclude = new Set(excludeSlotIds)
+  const ids = new Set<string>()
+  for (const [slotId, card] of Object.entries(existing)) {
+    if (card && !exclude.has(slotId)) ids.add(cardIdentity(card))
+  }
+  return ids
+}
+
+function findSlotWithIdentity(
+  cards: Record<string, Card | null>,
+  identity: string
+): string | null {
+  for (const [slotId, card] of Object.entries(cards)) {
+    if (card && cardIdentity(card) === identity) return slotId
+  }
+  return null
+}
+
+/** Remove conflicts so photo results always apply when possible. */
+export function sanitizePhotoMapping(
+  mapping: Record<string, Card>,
+  existing: Record<string, Card | null>
+): { mapping: Record<string, Card>; warnings: string[] } {
+  const warnings: string[] = []
+  const result: Record<string, Card> = {}
+
+  for (const [slotId, card] of Object.entries(mapping)) {
+    const id = cardIdentity(card)
+
+    // Same card already in this slot (re-photo refresh) — always OK
+    if (existing[slotId] && cardIdentity(existing[slotId]!) === id) {
+      result[slotId] = card
+      continue
+    }
+
+    // Card already lives on a different slot — skip misread, keep existing
+    const existingSlot = findSlotWithIdentity(existing, id)
+    if (existingSlot && existingSlot !== slotId) {
+      warnings.push(`${formatCardDisplay(card)} skipped (already on ${existingSlot.toUpperCase()})`)
+      continue
+    }
+
+    // Duplicate within this photo batch
+    if (Object.entries(result).some(([s, c]) => s !== slotId && cardIdentity(c) === id)) {
+      warnings.push(`${formatCardDisplay(card)} skipped (duplicate in photo)`)
+      continue
+    }
+
+    result[slotId] = card
+  }
+
+  return { mapping: result, warnings }
 }
 
 function parseCardList(raw: unknown): Card[] {
@@ -66,7 +139,7 @@ export function parseVisionResponse(text: string, context: PhotoReadContext): Pa
       const dealerUp = dealerRaw && typeof dealerRaw === 'object' && dealerRaw !== null
         ? normalizeCardFromAi(dealerRaw as { rank?: string; suit?: string })
         : null
-      const playerCards = parseCardList(obj.playerCards)
+      const playerCards = stripTableDuplicates(dealerUp, parseCardList(obj.playerCards))
       const flat = [...(dealerUp ? [dealerUp] : []), ...playerCards]
       return { dealerUp, playerCards, flat }
     }
@@ -75,10 +148,12 @@ export function parseVisionResponse(text: string, context: PhotoReadContext): Pa
   const arr = extractJsonArray(text)
   const flat = parseCardList(arr ?? [])
   if (context === 'table' && flat.length >= 6) {
-    return { dealerUp: flat[0] ?? null, playerCards: flat.slice(1, 6), flat }
+    const dealerUp = flat[0] ?? null
+    const playerCards = stripTableDuplicates(dealerUp, flat.slice(1, 6))
+    return { dealerUp, playerCards, flat: [...(dealerUp ? [dealerUp] : []), ...playerCards] }
   }
   if (context === 'table' && flat.length === 5) {
-    return { dealerUp: null, playerCards: flat, flat }
+    return { dealerUp: null, playerCards: dedupeCards(flat), flat: dedupeCards(flat) }
   }
   if (context === 'dealer-up') {
     return { dealerUp: flat[0] ?? null, playerCards: [], flat }
@@ -86,10 +161,10 @@ export function parseVisionResponse(text: string, context: PhotoReadContext): Pa
   if (context === 'dealer-rest') {
     const obj = extractJsonObject(text)
     if (obj && 'dealerHoleCards' in obj) {
-      const hole = parseCardList(obj.dealerHoleCards)
+      const hole = dedupeCards(parseCardList(obj.dealerHoleCards))
       return { dealerUp: null, playerCards: [], flat: hole }
     }
-    return { dealerUp: null, playerCards: [], flat }
+    return { dealerUp: null, playerCards: [], flat: dedupeCards(flat) }
   }
   return { dealerUp: null, playerCards: flat, flat }
 }
@@ -105,6 +180,22 @@ export function mapDetectedCardsToSlots(
   const hasDealer = !!existing['d1']
 
   if (context === 'table') {
+    const knownUp = existing['d1'] ?? null
+
+    // Dealer already logged — only fill player slots; ignore dealer in new photo
+    if (hasDealer && knownUp) {
+      const players = parsed.playerCards.length > 0
+        ? stripTableDuplicates(knownUp, parsed.playerCards)
+        : stripTableDuplicates(
+          knownUp,
+          parsed.flat.length >= 6 ? parsed.flat.slice(1, 6) : dedupeCards(parsed.flat)
+        )
+      playerSlotIds.forEach((id, i) => {
+        if (players[i]) mapping[id] = players[i]!
+      })
+      return mapping
+    }
+
     if (parsed.dealerUp) {
       mapping['d1'] = parsed.dealerUp
     }
@@ -114,14 +205,13 @@ export function mapDetectedCardsToSlots(
       })
       return mapping
     }
-    // Legacy flat array fallback
     const cards = parsed.flat
     if (cards.length >= 6) {
       mapping['d1'] = cards[0]!
       playerSlotIds.forEach((id, i) => { if (cards[i + 1]) mapping[id] = cards[i + 1]! })
     } else if (cards.length === 5) {
       playerSlotIds.forEach((id, i) => { if (cards[i]) mapping[id] = cards[i]! })
-    } else if (cards.length === 1 && !hasDealer) {
+    } else if (cards.length === 1) {
       mapping['d1'] = cards[0]!
     }
     return mapping
@@ -133,14 +223,25 @@ export function mapDetectedCardsToSlots(
   }
 
   if (context === 'player-hand') {
-    const cards = parsed.playerCards.length > 0 ? parsed.playerCards : parsed.flat
+    const cards = dedupeCards(parsed.playerCards.length > 0 ? parsed.playerCards : parsed.flat)
     playerSlotIds.length > 0
       ? playerSlotIds.forEach((id, i) => { if (cards[i]) mapping[id] = cards[i]! })
       : slotIds.forEach((id, i) => { if (cards[i]) mapping[id] = cards[i]! })
     return mapping
   }
 
-  // dealer-rest and generic
+  if (context === 'dealer-rest') {
+    const holeSlotIds = slotIds.filter(id => /^d[2-5]$/.test(id))
+    const taken = tableIdentities(existing, holeSlotIds)
+    const cards = dedupeCards(parsed.flat).filter(c => !taken.has(cardIdentity(c)))
+    // Order on felt may differ — fill D2–D5 with unique hole cards (order doesn't affect score)
+    holeSlotIds.forEach((id, i) => {
+      if (cards[i]) mapping[id] = cards[i]!
+    })
+    return mapping
+  }
+
+  // generic fallback
   slotIds.forEach((id, i) => {
     const card = parsed.flat[i]
     if (card) mapping[id] = card

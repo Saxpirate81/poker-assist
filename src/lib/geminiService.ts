@@ -37,10 +37,11 @@ Use T for ten.`
   }
   if (context === 'dealer-rest') {
     return `Caribbean Stud showdown photo. The dealer's final 4 hole cards (D2–D5) are now face-up or revealed.
-Find all ${expectedCount} dealer hole cards left to right.
+Find all ${expectedCount} dealer hole cards. Physical order on the table may vary — return cards in ANY order.
 Return ONLY valid JSON (no markdown):
 {"dealerHoleCards":[{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}, ...]}
-Must include all ${expectedCount} cards. Use T for ten. Do NOT include player cards or the dealer up-card.`
+Must include all ${expectedCount} unique cards. Use T for ten.
+Do NOT include the dealer up-card or any player cards.`
   }
   return `Find exactly ${expectedCount} PLAYER hole cards in this Caribbean Stud photo (the player's row of 5 cards), left to right.
 Do NOT include dealer cards.

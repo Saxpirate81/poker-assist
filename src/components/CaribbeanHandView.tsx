@@ -23,10 +23,10 @@ import {
 } from '../lib/caribbeanStud'
 import {
   findDuplicateCards,
-  validatePhotoMapping,
   validateTableForBet,
   validateTableForScore,
 } from '../lib/handValidation'
+import { sanitizePhotoMapping } from '../lib/photoCardMapping'
 import { getCaribbeanStep, getRaiseReason, shouldCaribbeanRaise, type CaribbeanStep } from '../lib/caribbeanFlow'
 import { analyzeCaribbeanBet } from '../lib/caribbeanOdds'
 import {
@@ -255,13 +255,13 @@ export function CaribbeanHandView({
   const showAnalysis = step === 'player' || step === 'bet'
 
   const handlePhotoCards = (mapping: Record<string, Card>) => {
-    const check = validatePhotoMapping(mapping, state.cards)
-    if (!check.ok) {
-      setValidationError(check.message ?? 'Duplicate card in photo')
+    const { mapping: clean, warnings } = sanitizePhotoMapping(mapping, state.cards)
+    if (Object.keys(clean).length === 0) {
+      setValidationError(warnings[0] ?? 'No new cards applied from photo')
       return
     }
     setValidationError(null)
-    onUpdateCards({ ...state.cards, ...mapping })
+    onUpdateCards({ ...state.cards, ...clean })
     aiFetchedForHand.current = false
     setLastAiAdvice(null)
     setPhotoRefresh(n => n + 1)

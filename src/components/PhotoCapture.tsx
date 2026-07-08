@@ -3,7 +3,7 @@ import type { Card } from '../types/poker'
 import { recognizeCardsFromPhoto } from '../lib/aiService'
 import { compressImageForAi } from '../lib/imageUtils'
 import type { PhotoReadContext } from '../lib/geminiService'
-import { mapDetectedCardsToSlots } from '../lib/photoCardMapping'
+import { mapDetectedCardsToSlots, sanitizePhotoMapping } from '../lib/photoCardMapping'
 import { getGeminiApiKey, getOpenAiApiKey } from '../lib/config'
 
 interface PhotoCaptureProps {
@@ -49,10 +49,12 @@ export function PhotoCapture({
         setError('No cards detected. Try better lighting and fill the frame with cards.')
         return
       }
-      const mapping = mapDetectedCardsToSlots(result.parsed, slotIds, context, existingCards)
+      let mapping = mapDetectedCardsToSlots(result.parsed, slotIds, context, existingCards)
+      const { mapping: clean, warnings } = sanitizePhotoMapping(mapping, existingCards)
+      mapping = clean
       const n = Object.keys(mapping).length
       if (n === 0) {
-        setError('Could not map cards to slots. Try framing all 5 player cards.')
+        setError(warnings[0] ?? 'No valid cards from photo — try again with clearer framing.')
         return
       }
       const playerMapped = slotIds.filter(id => id.startsWith('p') && mapping[id]).length
@@ -63,7 +65,7 @@ export function PhotoCapture({
           setError(`Only ${playerMapped}/5 player cards — frame full table in photo.`)
           return
         }
-        if (!mapping['d1'] && playerMapped < 3) {
+        if (!hasDealerUp && !mapping['d1'] && playerMapped < 3) {
           setError('Need dealer up-card + your 5 cards in one photo.')
           return
         }
@@ -81,6 +83,7 @@ export function PhotoCapture({
         `✓ ${n} card${n === 1 ? '' : 's'} loaded`
         + (playerMapped > 0 ? ` (${playerMapped} player)` : '')
         + (dealerHoleMapped > 0 ? ` (${dealerHoleMapped} dealer)` : '')
+        + (warnings.length ? ` · ${warnings.length} dup skipped` : '')
       )
       setTimeout(() => setSuccess(null), 3000)
     } catch (e) {
