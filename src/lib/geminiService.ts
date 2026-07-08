@@ -4,11 +4,16 @@ import { normalizeCardFromAi } from './pokerEval'
 
 export type PhotoReadContext = 'dealer-up' | 'player-hand' | 'table' | 'dealer-rest'
 
-const VISION_MODELS = [
-  'gemini-2.0-flash',
+/** Primary + fallbacks — 2.0 models retired; use 2.5 Flash family. */
+const GEMINI_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
   'gemini-1.5-flash',
-  'gemini-2.0-flash-lite',
 ] as const
+
+function geminiUrl(model: string, apiKey: string): string {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+}
 
 function buildVisionPrompt(context: PhotoReadContext, expectedCount: number): string {
   if (context === 'table') {
@@ -38,13 +43,44 @@ function parseGeminiError(status: number, body: string): string {
     const data = JSON.parse(body)
     const msg = data?.error?.message as string | undefined
     if (msg) {
-      if (status === 413 || msg.toLowerCase().includes('size')) return 'Photo too large — try again (auto-compress failed).'
-      if (status === 403) return 'Gemini API key invalid or vision not enabled. Check ⚙️ Settings.'
+      if (status === 404 || msg.toLowerCase().includes('no longer available')) {
+        return `Model unavailable: ${msg.slice(0, 80)}`
+      }
+      if (status === 413 || msg.toLowerCase().includes('size')) return 'Photo too large — try again.'
+      if (status === 403) return 'Gemini API key invalid. Check ⚙️ Settings.'
       if (status === 429) return 'Gemini rate limit — wait a moment and retry.'
       return `Gemini: ${msg.slice(0, 120)}`
     }
   } catch { /* ignore */ }
-  return `Gemini vision error (${status})`
+  return `Gemini error (${status})`
+}
+
+function shouldTryNextModel(status: number, error?: string): boolean {
+  if (status === 404) return true
+  if (!error) return false
+  const lower = error.toLowerCase()
+  return lower.includes('no longer available') || lower.includes('not found') || lower.includes('model unavailable')
+}
+
+async function callGeminiGenerate(
+  apiKey: string,
+  model: string,
+  body: Record<string, unknown>
+): Promise<{ ok: boolean; text: string; status: number; error?: string }> {
+  const res = await fetch(geminiUrl(model, apiKey), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const errBody = await res.text()
+    return { ok: false, text: '', status: res.status, error: parseGeminiError(res.status, errBody) }
+  }
+
+  const data = await res.json()
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+  return { ok: true, text, status: res.status }
 }
 
 async function callGeminiVision(
@@ -53,39 +89,29 @@ async function callGeminiVision(
   prompt: string,
   base64Data: string,
   mime: string
-): Promise<{ cards: Card[]; error?: string }> {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: mime, data: base64Data } },
-          ],
-        }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 600 },
-      }),
-    }
-  )
+): Promise<{ cards: Card[]; error?: string; status: number }> {
+  const result = await callGeminiGenerate(apiKey, model, {
+    contents: [{
+      parts: [
+        { text: prompt },
+        { inline_data: { mime_type: mime, data: base64Data } },
+      ],
+    }],
+    generationConfig: { temperature: 0.1, maxOutputTokens: 600 },
+  })
 
-  if (!res.ok) {
-    const body = await res.text()
-    return { cards: [], error: parseGeminiError(res.status, body) }
+  if (!result.ok) {
+    return { cards: [], error: result.error, status: result.status }
   }
 
-  const data = await res.json()
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-  const jsonMatch = text.match(/\[[\s\S]*?\]/)
+  const jsonMatch = result.text.match(/\[[\s\S]*?\]/)
   if (!jsonMatch) {
-    return { cards: [], error: 'Could not read cards from photo. Try a clearer, well-lit shot.' }
+    return { cards: [], error: 'Could not read cards from photo. Try a clearer, well-lit shot.', status: 200 }
   }
 
   const parsed = JSON.parse(jsonMatch[0]) as { rank?: string; suit?: string }[]
   const cards = parsed.map(normalizeCardFromAi).filter((c): c is Card => !!c)
-  return { cards }
+  return { cards, status: 200 }
 }
 
 export async function recognizeCardsFromPhotoGemini(
@@ -102,12 +128,12 @@ export async function recognizeCardsFromPhotoGemini(
   const prompt = buildVisionPrompt(context, expectedCount)
 
   let lastError = 'Gemini vision failed'
-  for (const model of VISION_MODELS) {
+  for (const model of GEMINI_MODELS) {
     const result = await callGeminiVision(apiKey, model, prompt, base64Data, mime)
-    if (result.cards.length > 0) return result
+    if (result.cards.length > 0) return { cards: result.cards }
     if (result.error) lastError = result.error
-    // Don't retry on auth errors
     if (result.error?.includes('API key') || result.error?.includes('403')) break
+    if (!shouldTryNextModel(result.status, result.error)) break
   }
 
   return { cards: [], error: lastError }
@@ -117,33 +143,28 @@ export async function getGeminiAdvice(prompt: string): Promise<AiAdvice | null> 
   const apiKey = getGeminiApiKey()
   if (!apiKey) return null
 
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
-        }),
+  for (const model of GEMINI_MODELS) {
+    try {
+      const result = await callGeminiGenerate(apiKey, model, {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
+      })
+
+      if (!result.ok) {
+        console.warn(`Gemini ${model} error`, result.error)
+        if (result.error?.includes('API key') || result.error?.includes('403')) break
+        if (shouldTryNextModel(result.status, result.error)) continue
+        break
       }
-    )
 
-    if (!res.ok) {
-      console.warn('Gemini API error', res.status, await res.text())
-      return null
+      const jsonMatch = result.text.match(/\{[\s\S]*\}/)
+      if (jsonMatch) return JSON.parse(jsonMatch[0]) as AiAdvice
+    } catch (e) {
+      console.warn(`Gemini ${model} request failed`, e)
     }
-
-    const data = await res.json()
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) return null
-    return JSON.parse(jsonMatch[0]) as AiAdvice
-  } catch (e) {
-    console.warn('Gemini request failed', e)
-    return null
   }
+
+  return null
 }
 
 export async function testGeminiConnection(): Promise<{ ok: boolean; message: string }> {
@@ -153,8 +174,8 @@ export async function testGeminiConnection(): Promise<{ ok: boolean; message: st
   const advice = await getGeminiAdvice(
     'Respond ONLY with JSON: {"verdict":"good","headline":"Test OK","detail":"Gemini connected","recommendedAction":"Raise $10","betAmount":10,"confidence":0.99,"urgent":false}'
   )
-  if (advice?.headline) return { ok: true, message: `Connected — ${advice.headline}` }
-  return { ok: false, message: 'Could not parse Gemini response. Check your API key.' }
+  if (advice?.headline) return { ok: true, message: `Connected (${GEMINI_MODELS[0]}) — ${advice.headline}` }
+  return { ok: false, message: 'Could not reach Gemini. Check your API key.' }
 }
 
 export function buildCaribbeanPrompt(params: {
