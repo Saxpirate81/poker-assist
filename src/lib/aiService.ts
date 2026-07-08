@@ -17,7 +17,7 @@ import { getRaiseReason, shouldCaribbeanRaise } from './caribbeanFlow'
 import { formatMoneyWithSymbol } from './money'
 import { getAiProvider, getOpenAiApiKey, setOpenAiApiKey } from './config'
 import { buildCaribbeanPrompt, getGeminiAdvice, recognizeCardsFromPhotoGemini, type PhotoReadContext } from './geminiService'
-import { normalizeCardFromAi } from './pokerEval'
+import { parseVisionResponse } from './photoCardMapping'
 
 export function getApiKey(): string {
   return getOpenAiApiKey()
@@ -433,18 +433,31 @@ Respond ONLY with JSON: {"verdict":"good|bad|neutral|warning","headline":"short"
 export async function recognizeCardsFromPhoto(
   imageBase64: string,
   expectedCount: number,
-  context: PhotoReadContext = 'player-hand'
-): Promise<{ cards: Card[]; error?: string }> {
-  const gemini = await recognizeCardsFromPhotoGemini(imageBase64, expectedCount, context)
+  context: PhotoReadContext = 'player-hand',
+  options?: { hasDealerUp?: boolean }
+): Promise<{ cards: Card[]; parsed: ReturnType<typeof parseVisionResponse>; error?: string }> {
+  const gemini = await recognizeCardsFromPhotoGemini(imageBase64, expectedCount, context, options)
   if (gemini.cards.length > 0) return gemini
   if (gemini.error && !getOpenAiApiKey()) return gemini
 
   const apiKey = getOpenAiApiKey()
   if (!apiKey) {
-    return { cards: [], error: gemini.error ?? 'Add Gemini or OpenAI API key in Settings for photo read.' }
+    return {
+      cards: [],
+      parsed: { dealerUp: null, playerCards: [], flat: [] },
+      error: gemini.error ?? 'Add Gemini or OpenAI API key in Settings for photo read.',
+    }
   }
 
+  const emptyParsed = { dealerUp: null, playerCards: [], flat: [] as Card[] }
+
   try {
+    const promptText = context === 'table'
+      ? `Caribbean Stud table photo. Return JSON: {"dealerUp":{"rank","suit"}|null,"playerCards":[5 cards left-to-right]}. Use T for ten. Include ALL 5 player cards.`
+      : context === 'player-hand'
+        ? `Find ${expectedCount} PLAYER cards only (not dealer), left to right. Return JSON array of ${expectedCount} cards. Use T for ten.`
+        : `Identify ~${expectedCount} playing cards left-to-right. Return ONLY JSON array [{"rank","suit"}]. Use T for ten.`
+
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -456,34 +469,26 @@ export async function recognizeCardsFromPhoto(
         messages: [{
           role: 'user',
           content: [
-            {
-              type: 'text',
-              text: `Identify playing cards in this photo. Expect ~${expectedCount} cards visible.
-Return ONLY JSON array: [{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}]
-Use T for ten. Left-to-right order. If unsure, omit that card.`,
-            },
-            {
-              type: 'image_url',
-              image_url: { url: imageBase64 },
-            },
+            { type: 'text', text: promptText },
+            { type: 'image_url', image_url: { url: imageBase64 } },
           ],
         }],
-        max_tokens: 300,
+        max_tokens: 500,
       }),
     })
 
     if (!res.ok) {
-      return { cards: [], error: `Vision API error: ${res.status}` }
+      return { cards: [], parsed: emptyParsed, error: `Vision API error: ${res.status}` }
     }
 
     const data = await res.json()
     const content = data.choices?.[0]?.message?.content ?? ''
-    const jsonMatch = content.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) return { cards: [], error: 'Could not parse cards from photo.' }
-
-    const parsed = JSON.parse(jsonMatch[0]) as { rank?: string; suit?: string }[]
-    return { cards: parsed.map(normalizeCardFromAi).filter((c): c is Card => !!c) }
+    const parsed = parseVisionResponse(content, context)
+    if (parsed.flat.length === 0) {
+      return { cards: [], parsed, error: 'Could not parse cards from photo.' }
+    }
+    return { cards: parsed.flat, parsed }
   } catch (e) {
-    return { cards: [], error: e instanceof Error ? e.message : 'Recognition failed' }
+    return { cards: [], parsed: emptyParsed, error: e instanceof Error ? e.message : 'Recognition failed' }
   }
 }

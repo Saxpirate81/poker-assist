@@ -3,6 +3,7 @@ import type { Card } from '../types/poker'
 import { recognizeCardsFromPhoto } from '../lib/aiService'
 import { compressImageForAi } from '../lib/imageUtils'
 import type { PhotoReadContext } from '../lib/geminiService'
+import { mapDetectedCardsToSlots } from '../lib/photoCardMapping'
 import { getGeminiApiKey, getOpenAiApiKey } from '../lib/config'
 
 interface PhotoCaptureProps {
@@ -12,6 +13,7 @@ interface PhotoCaptureProps {
   label?: string
   compact?: boolean
   context?: PhotoReadContext
+  existingCards?: Record<string, Card | null>
 }
 
 export function PhotoCapture({
@@ -21,6 +23,7 @@ export function PhotoCapture({
   label,
   compact,
   context = 'player-hand',
+  existingCards = {},
 }: PhotoCaptureProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
@@ -34,7 +37,8 @@ export function PhotoCapture({
     setSuccess(null)
     try {
       const base64 = await compressImageForAi(file)
-      const result = await recognizeCardsFromPhoto(base64, expectedCount, context)
+      const hasDealerUp = !!existingCards['d1']
+      const result = await recognizeCardsFromPhoto(base64, expectedCount, context, { hasDealerUp })
       if (result.error && result.cards.length === 0) {
         setError(result.error)
         return
@@ -43,13 +47,23 @@ export function PhotoCapture({
         setError('No cards detected. Try better lighting and fill the frame with cards.')
         return
       }
-      const mapping: Record<string, Card> = {}
-      result.cards.forEach((card, i) => {
-        if (slotIds[i]) mapping[slotIds[i]] = card
-      })
-      onCardsDetected(mapping)
+      const mapping = mapDetectedCardsToSlots(result.parsed, slotIds, context, existingCards)
       const n = Object.keys(mapping).length
-      setSuccess(`✓ ${n} card${n === 1 ? '' : 's'} loaded`)
+      if (n === 0) {
+        setError('Could not map cards to slots. Try framing all 5 player cards.')
+        return
+      }
+      const playerMapped = slotIds.filter(id => id.startsWith('p') && mapping[id]).length
+      if (context === 'player-hand' && playerMapped < 3) {
+        setError(`Only mapped ${playerMapped}/5 player cards — include full hand in photo.`)
+        return
+      }
+      if (context === 'table' && !hasDealerUp && !mapping['d1'] && playerMapped < 3) {
+        setError(`Found dealer only — include your 5 player cards in the photo.`)
+        return
+      }
+      onCardsDetected(mapping)
+      setSuccess(`✓ ${n} card${n === 1 ? '' : 's'} loaded${playerMapped > 0 ? ` (${playerMapped} player)` : ''}`)
       setTimeout(() => setSuccess(null), 3000)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Photo read failed')

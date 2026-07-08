@@ -289,11 +289,14 @@ export function CaribbeanHandView({
   const bannerAlert = !!(validationError || tableDup)
   const showPhoto = step === 'dealer-up' || step === 'player' || step === 'bet' || step === 'showdown'
 
-  const photoLabel =
-    step === 'dealer-up' ? 'Photo: dealer up'
-      : step === 'showdown' ? 'Photo: dealer 2–5'
-        : step === 'bet' || step === 'player' ? 'Photo: table snap'
-          : 'Photo: your 5'
+  const photoConfig =
+    step === 'dealer-up'
+      ? { context: 'dealer-up' as const, expected: 1, slots: ['d1'], label: 'Photo: dealer up' }
+      : step === 'showdown'
+        ? { context: 'dealer-rest' as const, expected: 4, slots: dealerRestIds, label: 'Photo: dealer 2–5' }
+        : dealerUp
+          ? { context: 'player-hand' as const, expected: 5, slots: playerIds, label: 'Photo: your 5 cards' }
+          : { context: 'table' as const, expected: 6, slots: tableSlotIds, label: 'Photo: dealer + your 5' }
 
   return (
     <>
@@ -462,26 +465,12 @@ export function CaribbeanHandView({
             {showPhoto && (
               <PhotoCapture
                 compact
-                expectedCount={
-                  step === 'dealer-up' ? 1
-                    : step === 'showdown' ? 4
-                      : step === 'bet' || step === 'player' ? 6
-                        : 5
-                }
-                slotIds={
-                  step === 'dealer-up' ? ['d1']
-                    : step === 'showdown' ? dealerRestIds
-                      : step === 'bet' || step === 'player' ? tableSlotIds
-                        : playerIds
-                }
-                context={
-                  step === 'dealer-up' ? 'dealer-up'
-                    : step === 'showdown' ? 'dealer-rest'
-                      : step === 'bet' || step === 'player' ? 'table'
-                        : 'player-hand'
-                }
+                expectedCount={photoConfig.expected}
+                slotIds={photoConfig.slots}
+                context={photoConfig.context}
+                existingCards={state.cards}
                 onCardsDetected={handlePhotoCards}
-                label={photoLabel}
+                label={photoConfig.label}
               />
             )}
           </footer>

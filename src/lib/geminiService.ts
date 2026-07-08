@@ -1,6 +1,6 @@
 import type { AiAdvice, Card } from '../types/poker'
 import { getGeminiApiKey } from './config'
-import { normalizeCardFromAi } from './pokerEval'
+import { minCardsForContext, parseVisionResponse } from './photoCardMapping'
 
 export type PhotoReadContext = 'dealer-up' | 'player-hand' | 'table' | 'dealer-rest'
 
@@ -17,11 +17,18 @@ function geminiUrl(model: string, apiKey: string): string {
 
 function buildVisionPrompt(context: PhotoReadContext, expectedCount: number): string {
   if (context === 'table') {
-    return `Caribbean Stud poker table photo. Find all visible face-up playing cards.
-Usually: 1 dealer up-card near the dealer, then 5 player cards in the player's row below.
-Return ONLY a JSON array in reading order (dealer up-card first, then player cards left-to-right):
-[{"rank":"A"|"2"|"3"|"4"|"5"|"6"|"7"|"8"|"9"|"T"|"J"|"Q"|"K","suit":"hearts"|"diamonds"|"clubs"|"spades"}]
-Use T for ten (not "10"). Skip face-down cards. Expect about ${expectedCount} cards.`
+    return `Caribbean Stud poker table photo. Identify EVERY face-up playing card.
+
+Layout: dealer row (often 1 face-up card) above/near dealer; player row below with 5 face-up cards.
+
+Return ONLY valid JSON (no markdown):
+{"dealerUp":{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}|null,"playerCards":[{"rank":"...","suit":"..."}, ...]}
+
+Rules:
+- playerCards MUST have all 5 player cards when visible (left-to-right).
+- dealerUp is the single dealer up-card; use null if not visible.
+- Use T for ten (never "10"). Skip face-down cards.
+- Include every face-up card you can read — do not stop after the dealer card.`
   }
   if (context === 'dealer-up') {
     return `Find the single face-up dealer card in this Caribbean Stud photo.
@@ -33,9 +40,11 @@ Use T for ten.`
 Return ONLY a JSON array: [{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}]
 Use T for ten.`
   }
-  return `Find ${expectedCount} player hole cards in this Caribbean Stud photo, left to right.
-Return ONLY a JSON array: [{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}]
-Use T for ten. Skip dealer cards.`
+  return `Find exactly ${expectedCount} PLAYER hole cards in this Caribbean Stud photo (the player's row of 5 cards), left to right.
+Do NOT include dealer cards.
+Return ONLY a JSON array with ${expectedCount} objects:
+[{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}]
+Use T for ten. You must return all ${expectedCount} player cards visible.`
 }
 
 function parseGeminiError(status: number, body: string): string {
@@ -88,8 +97,9 @@ async function callGeminiVision(
   model: string,
   prompt: string,
   base64Data: string,
-  mime: string
-): Promise<{ cards: Card[]; error?: string; status: number }> {
+  mime: string,
+  context: PhotoReadContext
+): Promise<{ cards: Card[]; parsed: ReturnType<typeof parseVisionResponse>; error?: string; status: number }> {
   const result = await callGeminiGenerate(apiKey, model, {
     contents: [{
       parts: [
@@ -97,46 +107,88 @@ async function callGeminiVision(
         { inline_data: { mime_type: mime, data: base64Data } },
       ],
     }],
-    generationConfig: { temperature: 0.1, maxOutputTokens: 600 },
+    generationConfig: { temperature: 0.1, maxOutputTokens: context === 'table' ? 1200 : 800 },
   })
 
   if (!result.ok) {
-    return { cards: [], error: result.error, status: result.status }
+    return { cards: [], parsed: { dealerUp: null, playerCards: [], flat: [] }, error: result.error, status: result.status }
   }
 
-  const jsonMatch = result.text.match(/\[[\s\S]*?\]/)
-  if (!jsonMatch) {
-    return { cards: [], error: 'Could not read cards from photo. Try a clearer, well-lit shot.', status: 200 }
+  const parsed = parseVisionResponse(result.text, context)
+  const cards = parsed.flat
+  if (cards.length === 0) {
+    return {
+      cards: [],
+      parsed,
+      error: 'Could not read cards from photo. Try a clearer, well-lit shot framing all cards.',
+      status: 200,
+    }
   }
 
-  const parsed = JSON.parse(jsonMatch[0]) as { rank?: string; suit?: string }[]
-  const cards = parsed.map(normalizeCardFromAi).filter((c): c is Card => !!c)
-  return { cards, status: 200 }
+  return { cards, parsed, status: 200 }
 }
 
 export async function recognizeCardsFromPhotoGemini(
   imageBase64: string,
   expectedCount: number,
-  context: PhotoReadContext = 'player-hand'
-): Promise<{ cards: Card[]; error?: string }> {
+  context: PhotoReadContext = 'player-hand',
+  options?: { hasDealerUp?: boolean }
+): Promise<{ cards: Card[]; parsed: ReturnType<typeof parseVisionResponse>; error?: string }> {
   const apiKey = getGeminiApiKey()
-  if (!apiKey) return { cards: [], error: 'Add Gemini API key in ⚙️ Settings for photo read.' }
+  if (!apiKey) return { cards: [], parsed: { dealerUp: null, playerCards: [], flat: [] }, error: 'Add Gemini API key in ⚙️ Settings for photo read.' }
 
   const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1]! : imageBase64
   const mimeMatch = imageBase64.match(/^data:(image\/[a-z+]+);/i)
   const mime = mimeMatch?.[1] === 'image/png' ? 'image/png' : 'image/jpeg'
   const prompt = buildVisionPrompt(context, expectedCount)
+  const minRequired = minCardsForContext(context, expectedCount, !!options?.hasDealerUp)
 
   let lastError = 'Gemini vision failed'
+  let best: { cards: Card[]; parsed: ReturnType<typeof parseVisionResponse> } | null = null
+
   for (const model of GEMINI_MODELS) {
-    const result = await callGeminiVision(apiKey, model, prompt, base64Data, mime)
-    if (result.cards.length > 0) return { cards: result.cards }
+    const result = await callGeminiVision(apiKey, model, prompt, base64Data, mime, context)
+    if (result.error && result.cards.length === 0) {
+      lastError = result.error
+      if (result.error?.includes('API key') || result.error?.includes('403')) break
+      if (shouldTryNextModel(result.status, result.error)) continue
+      break
+    }
+
+    const playerCount = result.parsed.playerCards.length
+    const total = result.cards.length
+
+    if (context === 'table' && playerCount >= 5) {
+      return { cards: result.cards, parsed: result.parsed }
+    }
+    if (context === 'table' && options?.hasDealerUp && playerCount >= 3) {
+      return { cards: result.cards, parsed: result.parsed }
+    }
+    if (total >= expectedCount) {
+      return { cards: result.cards, parsed: result.parsed }
+    }
+    if (total >= minRequired) {
+      if (!best || total > best.cards.length || playerCount > best.parsed.playerCards.length) {
+        best = { cards: result.cards, parsed: result.parsed }
+      }
+    }
+
     if (result.error) lastError = result.error
     if (result.error?.includes('API key') || result.error?.includes('403')) break
     if (!shouldTryNextModel(result.status, result.error)) break
   }
 
-  return { cards: [], error: lastError }
+  if (best && best.cards.length >= minRequired) {
+    return { cards: best.cards, parsed: best.parsed }
+  }
+
+  return {
+    cards: [],
+    parsed: { dealerUp: null, playerCards: [], flat: [] },
+    error: lastError.includes('Could not read')
+      ? lastError
+      : `Only found ${best?.cards.length ?? 0} card(s). Frame all 5 player cards (and dealer if needed) and retry.`,
+  }
 }
 
 export async function getGeminiAdvice(prompt: string): Promise<AiAdvice | null> {
