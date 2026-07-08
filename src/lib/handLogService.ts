@@ -156,7 +156,9 @@ export function rebuildSessionFromHands(hands: LoggedCaribbeanHand[]): Caribbean
     raises: hands.filter(h => h.action === 'raise').length,
     folds: hands.filter(h => h.action === 'fold').length,
     wins: hands.filter(h => h.playerWon).length,
-    losses: hands.filter(h => h.action === 'raise' && !h.playerWon).length,
+    losses: hands.filter(h =>
+      h.action === 'raise' && !h.playerWon && !h.outcomeSummary.toLowerCase().includes('push')
+    ).length,
     netPnL,
     handHistory: [],
   }
@@ -177,13 +179,18 @@ export function computeTrends(hands: LoggedCaribbeanHand[]): HandTrends {
 
   let streak = ''
   for (const h of hands.slice(0, 10)) {
-    streak += h.playerWon ? 'W' : h.action === 'fold' ? 'F' : 'L'
+    if (h.action === 'fold') streak += 'F'
+    else if (h.playerWon) streak += 'W'
+    else if (h.outcomeSummary.toLowerCase().includes('push')) streak += 'P'
+    else streak += 'L'
   }
 
   return {
     totalHands: hands.length,
     wins,
-    losses: hands.filter(h => h.action === 'raise' && !h.playerWon).length,
+    losses: hands.filter(h =>
+      h.action === 'raise' && !h.playerWon && !h.outcomeSummary.toLowerCase().includes('push')
+    ).length,
     folds,
     raises,
     totalPnL,

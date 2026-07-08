@@ -1,6 +1,8 @@
 import type { Card } from '../types/poker'
 import type { EvaluatedHand, HandRank } from './pokerEval'
 import { evaluateHand, rankValue, formatRankDisplay } from './pokerEval'
+import { formatMoneyWithSymbol } from './money'
+import { validatePlayerHand, validateFullDealerHand } from './handValidation'
 
 export type CaribbeanPhase = 'ante' | 'cards' | 'decision' | 'showdown'
 
@@ -111,6 +113,8 @@ export interface CaribbeanOutcome {
   raiseWin: number
   dealerQualified: boolean
   playerWon: boolean
+  outcomeType: 'fold' | 'win' | 'loss' | 'push' | 'dealer_no_qualify' | 'invalid'
+  valid: boolean
 }
 
 export function describeDealerHand(cards: Card[]): { label: string; qualifies: boolean } | null {
@@ -128,13 +132,29 @@ export function calculateOutcome(
   action: 'raise' | 'fold',
   progressiveBet: number
 ): CaribbeanOutcome {
+  const fmt = (n: number) => formatMoneyWithSymbol(n)
   const totalIn = ante + progressiveBet + (action === 'raise' ? raiseAmount : 0)
+  const foldLoss = ante + progressiveBet
+
+  const playerCheck = validatePlayerHand(playerCards)
+  if (!playerCheck.ok) {
+    return {
+      summary: playerCheck.message ?? 'Invalid player hand',
+      netResult: 0,
+      anteWin: 0,
+      raiseWin: 0,
+      dealerQualified: false,
+      playerWon: false,
+      outcomeType: 'invalid',
+      valid: false,
+    }
+  }
 
   if (action === 'fold') {
     const dealerInfo = describeDealerHand(dealerCards)
     const summary = dealerInfo
-      ? `Folded — lost $${ante + progressiveBet} · Dealer: ${dealerInfo.label}${dealerInfo.qualifies ? ' (qualifies)' : ' (no qualify)'}`
-      : `Folded — lost $${ante + progressiveBet}`
+      ? `Folded — lost ${fmt(foldLoss)} · Dealer: ${dealerInfo.label}${dealerInfo.qualifies ? ' (qualifies)' : ' (no qualify)'}`
+      : `Folded — lost ${fmt(foldLoss)}`
     return {
       summary,
       netResult: -totalIn,
@@ -142,6 +162,24 @@ export function calculateOutcome(
       raiseWin: 0,
       dealerQualified: dealerInfo?.qualifies ?? false,
       playerWon: false,
+      outcomeType: 'fold',
+      valid: true,
+    }
+  }
+
+  const dealerUp = dealerCards[0]
+  const dealerHole = dealerCards.slice(1)
+  const dealerCheck = validateFullDealerHand(dealerUp ?? null, dealerHole)
+  if (!dealerCheck.ok) {
+    return {
+      summary: dealerCheck.message ?? 'Need full dealer hand to score raise',
+      netResult: 0,
+      anteWin: 0,
+      raiseWin: 0,
+      dealerQualified: false,
+      playerWon: false,
+      outcomeType: 'invalid',
+      valid: false,
     }
   }
 
@@ -153,12 +191,14 @@ export function calculateOutcome(
     const received = ante * 2 + raiseAmount
     const net = received - totalIn
     return {
-      summary: `Dealer no qualify (${dealerHand.label}) — won $${ante} on ante, raise pushes (+$${net})`,
+      summary: `Dealer no qualify (${dealerHand.label}) — won ${fmt(ante)} on ante, raise pushes (${net >= 0 ? '+' : ''}${fmt(net)})`,
       netResult: net,
       anteWin: ante,
       raiseWin: 0,
       dealerQualified: false,
       playerWon: true,
+      outcomeType: 'dealer_no_qualify',
+      valid: true,
     }
   }
 
@@ -168,34 +208,40 @@ export function calculateOutcome(
     const received = ante + ante * bonus + raiseAmount * 2
     const net = received - totalIn
     return {
-      summary: `You win! ${playerHand.label} — ante ${bonus}:1 + raise (+$${net})`,
+      summary: `You win! ${playerHand.label} — ante ${bonus}:1 + raise (${net >= 0 ? '+' : ''}${fmt(net)})`,
       netResult: net,
       anteWin: ante * bonus,
       raiseWin: raiseAmount,
       dealerQualified: true,
       playerWon: true,
+      outcomeType: 'win',
+      valid: true,
     }
   }
   if (result === 'push') {
     const received = ante + raiseAmount
     const net = received - totalIn
     return {
-      summary: `Push — bets returned (${net >= 0 ? '+' : ''}$${net})`,
+      summary: `Push — ${playerHand.label} vs ${dealerHand.label} (${net >= 0 ? '+' : ''}${fmt(net)})`,
       netResult: net,
       anteWin: 0,
       raiseWin: 0,
       dealerQualified: true,
       playerWon: false,
+      outcomeType: 'push',
+      valid: true,
     }
   }
 
   return {
-    summary: `Dealer wins (${dealerHand.label}) — lost $${totalIn}`,
+    summary: `Dealer wins (${dealerHand.label}) — lost ${fmt(totalIn)}`,
     netResult: -totalIn,
     anteWin: -ante,
     raiseWin: -raiseAmount,
     dealerQualified: true,
     playerWon: false,
+    outcomeType: 'loss',
+    valid: true,
   }
 }
 

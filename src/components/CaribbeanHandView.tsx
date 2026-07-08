@@ -21,6 +21,12 @@ import {
   loadCaribbeanSession,
   saveCaribbeanSession,
 } from '../lib/caribbeanStud'
+import {
+  findDuplicateCards,
+  validatePhotoMapping,
+  validateTableForBet,
+  validateTableForScore,
+} from '../lib/handValidation'
 import { getCaribbeanStep, getRaiseReason, shouldCaribbeanRaise, type CaribbeanStep } from '../lib/caribbeanFlow'
 import { analyzeCaribbeanBet } from '../lib/caribbeanOdds'
 import {
@@ -70,13 +76,13 @@ export function CaribbeanHandView({
   const [lastAiAdvice, setLastAiAdvice] = useState<(AiAdvice & { provider?: string }) | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [photoRefresh, setPhotoRefresh] = useState(0)
+  const [validationError, setValidationError] = useState<string | null>(null)
   const scoredRef = useRef(false)
   const aiFetchedForHand = useRef(false)
 
   const dealerUp = state.cards['d1'] ?? null
   const playerIds = game.playerSlots.map(s => s.id)
   const playerCards = playerIds.map(id => state.cards[id]).filter((c): c is Card => !!c)
-  const dealerSlotIds = ['d1', 'd2', 'd3', 'd4', 'd5']
   const dealerRestIds = ['d2', 'd3', 'd4', 'd5']
   const dealerRest = dealerRestIds.map(id => state.cards[id]).filter((c): c is Card => !!c)
   const step = getCaribbeanStep(dealerUp, playerCards, betAction, dealerRest.length)
@@ -100,6 +106,15 @@ export function CaribbeanHandView({
   const trends = computeTrends(loggedHands)
   const betAnalysis = analyzeCaribbeanBet(playerCards, dealerUp, ante, raiseAmt, progressive)
   const cardsReady = playerCards.length === 5 && !!dealerUp
+  const tableDup = findDuplicateCards(
+    playerCards,
+    dealerUp ? [dealerUp] : [],
+    dealerRest
+  )
+  const betReady = validateTableForBet(playerCards, dealerUp).ok && !tableDup
+  const showdownPreview = betAction && allDealerCards.length === 5
+    ? calculateOutcome(playerCards, allDealerCards, ante, raiseAmt, betAction, progressive)
+    : null
 
   useEffect(() => { saveCaribbeanSession(session) }, [session])
   useEffect(() => { fetchCaribbeanHands().then(setLoggedHands) }, [])
@@ -124,9 +139,26 @@ export function CaribbeanHandView({
 
   const finalizeHand = async (action: 'raise' | 'fold', allDealer: Card[]) => {
     if (scoredRef.current) return
-    scoredRef.current = true
+
+    const validation = validateTableForScore(
+      playerCards,
+      dealerUp,
+      allDealer.slice(1),
+      action
+    )
+    if (!validation.ok) {
+      setValidationError(validation.message ?? 'Invalid hand')
+      return
+    }
 
     const outcome = calculateOutcome(playerCards, allDealer, ante, raiseAmt, action, progressive)
+    if (!outcome.valid) {
+      setValidationError(outcome.summary)
+      return
+    }
+
+    scoredRef.current = true
+    setValidationError(null)
     const dealerEval = allDealer.length === 5 ? evaluateHand(allDealer) : null
     setResultText(outcome.summary)
 
@@ -161,14 +193,26 @@ export function CaribbeanHandView({
       handsPlayed: prev.handsPlayed + 1,
       raises: action === 'raise' ? prev.raises + 1 : prev.raises,
       folds: action === 'fold' ? prev.folds + 1 : prev.folds,
-      wins: outcome.playerWon ? prev.wins + 1 : prev.wins,
-      losses: !outcome.playerWon ? prev.losses + 1 : prev.losses,
+      wins: outcome.outcomeType === 'win' || outcome.outcomeType === 'dealer_no_qualify'
+        ? prev.wins + 1
+        : prev.wins,
+      losses: outcome.outcomeType === 'loss' ? prev.losses + 1 : prev.losses,
       netPnL: prev.netPnL + outcome.netResult,
       bankroll: prev.bankroll + outcome.netResult,
     }))
   }
 
   const handleBet = (action: 'raise' | 'fold') => {
+    const check = validateTableForBet(playerCards, dealerUp)
+    if (!check.ok) {
+      setValidationError(check.message ?? 'Complete your hand first')
+      return
+    }
+    if (tableDup) {
+      setValidationError(tableDup)
+      return
+    }
+    setValidationError(null)
     setBetAction(action)
   }
 
@@ -184,6 +228,7 @@ export function CaribbeanHandView({
     setBetAction(null)
     setResultText(null)
     setLastAiAdvice(null)
+    setValidationError(null)
     onNewHand()
   }
 
@@ -209,9 +254,13 @@ export function CaribbeanHandView({
 
   const showAnalysis = step === 'player' || step === 'bet'
 
-  const playerCardsUsed = playerIds.map(id => state.cards[id]).filter((c): c is Card => !!c)
-  const dealerCardsUsed = dealerSlotIds.map(id => state.cards[id]).filter((c): c is Card => !!c)
   const handlePhotoCards = (mapping: Record<string, Card>) => {
+    const check = validatePhotoMapping(mapping, state.cards)
+    if (!check.ok) {
+      setValidationError(check.message ?? 'Duplicate card in photo')
+      return
+    }
+    setValidationError(null)
     onUpdateCards({ ...state.cards, ...mapping })
     aiFetchedForHand.current = false
     setLastAiAdvice(null)
@@ -221,7 +270,9 @@ export function CaribbeanHandView({
   const tableSlotIds = ['d1', ...playerIds]
 
   const pickerUsedCards = pickerSlot
-    ? (dealerSlotIds.includes(pickerSlot.id) ? dealerCardsUsed : playerCardsUsed)
+    ? Object.entries(state.cards)
+        .filter(([id, c]) => id !== pickerSlot.id && c)
+        .map(([, c]) => c as Card)
     : []
 
   return (
@@ -248,6 +299,19 @@ export function CaribbeanHandView({
           {step === 'done' && (resultText ?? 'Hand complete')}
         </p>
       </div>
+
+      {showdownPreview?.valid && step === 'showdown' && (
+        <div className="mb-2 py-2 px-3 rounded-lg bg-black/40 border border-white/10 text-center">
+          <p className="text-[10px] text-white/40 uppercase tracking-wide">Projected result</p>
+          <p className="text-sm text-white/90 mt-0.5">{showdownPreview.summary}</p>
+        </div>
+      )}
+
+      {(validationError || tableDup) && (
+        <div className="mb-2 py-2 px-3 rounded-lg bg-red-950/80 border border-red-500/40 text-center">
+          <p className="text-xs text-red-300">{validationError ?? tableDup}</p>
+        </div>
+      )}
 
       {(step === 'dealer-up' || step === 'player' || step === 'bet' || step === 'showdown') && (
         <div className="mb-2">
@@ -425,8 +489,22 @@ export function CaribbeanHandView({
           )}
           {step === 'bet' && (
             <div className="flex gap-2">
-              <button type="button" onClick={() => handleBet('fold')} className="flex-1 py-4 rounded-xl bg-red-600 font-bold text-lg">Fold</button>
-              <button type="button" onClick={() => handleBet('raise')} className="flex-[1.4] py-4 rounded-xl bg-gold text-slate-900 font-bold text-lg">Raise {formatMoneyWithSymbol(raiseAmt)}</button>
+              <button
+                type="button"
+                onClick={() => handleBet('fold')}
+                disabled={!betReady}
+                className="flex-1 py-4 rounded-xl bg-red-600 font-bold text-lg disabled:opacity-40"
+              >
+                Fold
+              </button>
+              <button
+                type="button"
+                onClick={() => handleBet('raise')}
+                disabled={!betReady}
+                className="flex-[1.4] py-4 rounded-xl bg-gold text-slate-900 font-bold text-lg disabled:opacity-40"
+              >
+                Raise {formatMoneyWithSymbol(raiseAmt)}
+              </button>
             </div>
           )}
           {step === 'showdown' && (
@@ -435,14 +513,17 @@ export function CaribbeanHandView({
                 {betAction === 'fold' ? 'Folded — ' : 'Raised — '}
                 tap dealer cards D2–D5 ({dealerRest.length}/4)
               </p>
-              {dealerRest.length < 4 && (
+              {betAction === 'fold' && dealerRest.length < 4 && (
                 <button
                   type="button"
-                  onClick={() => dealerUp && finalizeHand(betAction!, [dealerUp, ...dealerRest])}
+                  onClick={() => dealerUp && finalizeHand('fold', [dealerUp, ...dealerRest])}
                   className="mt-1 text-[10px] text-white/40 underline hover:text-white/60"
                 >
-                  Skip dealer cards &amp; finish
+                  Finish without full dealer hand
                 </button>
+              )}
+              {betAction === 'raise' && dealerRest.length < 4 && (
+                <p className="mt-1 text-[10px] text-amber-400">Log all 4 dealer cards to score this raise</p>
               )}
             </div>
           )}
