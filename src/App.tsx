@@ -81,16 +81,20 @@ function App() {
     setHandState(createInitialHand(game))
   }, [game])
 
+  const isCaribbeanHand = screen === 'hand' && game?.id === 'caribbean-stud'
+
   return (
-    <div className="min-h-dvh relative">
-      <button
-        type="button"
-        onClick={() => setShowSettings(true)}
-        className="fixed top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] z-40 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-lg backdrop-blur-sm border border-white/10"
-        aria-label="Settings"
-      >
-        ⚙️
-      </button>
+    <div className="app-shell relative">
+      {!isCaribbeanHand && (
+        <button
+          type="button"
+          onClick={() => setShowSettings(true)}
+          className="fixed top-3 right-3 z-40 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-lg backdrop-blur-sm border border-white/10"
+          aria-label="Settings"
+        >
+          ⚙️
+        </button>
+      )}
 
       {screen === 'select' && (
         <GameSelect onSelect={g => selectGame(g, false)} onQuickStartCaribbean={quickStartCaribbean} />

@@ -275,262 +275,216 @@ export function CaribbeanHandView({
         .map(([, c]) => c as Card)
     : []
 
+  const stepHint =
+    step === 'dealer-up' ? 'Tap dealer up-card or photo'
+      : step === 'player' ? `${playerCards.length}/5 cards · tap or photo`
+        : step === 'bet' ? (shouldRaise ? (raiseReason || 'Strategy says raise') : `Fold saves ${formatMoneyWithSymbol(raiseAmt)}`)
+          : step === 'showdown'
+            ? (betAction === 'fold'
+              ? `Folded · dealer ${dealerRest.length}/4`
+              : `Dealer ${dealerRest.length}/4 · ${showdownPreview?.valid ? showdownPreview.summary : 'log all cards'}`)
+            : (resultText ?? 'Hand complete')
+
+  const bannerText = validationError ?? tableDup ?? stepHint
+  const bannerAlert = !!(validationError || tableDup)
+  const showPhoto = step === 'dealer-up' || step === 'player' || step === 'bet' || step === 'showdown'
+
+  const photoLabel =
+    step === 'dealer-up' ? 'Photo: dealer up'
+      : step === 'showdown' ? 'Photo: dealer 2–5'
+        : step === 'bet' || step === 'player' ? 'Photo: table snap'
+          : 'Photo: your 5'
+
   return (
-    <div className="max-w-lg mx-auto px-4 py-3 pb-52 flex flex-col min-h-dvh">
-      <div className="flex items-center justify-between mb-2">
-        <button type="button" onClick={onBack} className="text-sm text-white/50 hover:text-white">← Exit</button>
-        <span className="text-sm font-bold">🏝️ Caribbean Stud</span>
-        <button type="button" onClick={handleNextHand} className="text-sm text-gold font-semibold">New Hand →</button>
-      </div>
-
-      <CaribbeanSessionBar session={session} />
-
-      <div className="mb-2 py-2 px-3 rounded-xl bg-gold/20 border border-gold/50 text-center">
-        <p className="text-gold font-bold text-sm">{STEP_LABELS[step]}</p>
-        <p className="text-white/60 text-xs mt-0.5">
-          {step === 'dealer-up' && 'Tap dealer up-card or use photo read'}
-          {step === 'player' && `${playerCards.length}/5 cards · snap table photo or tap cards`}
-          {step === 'bet' && 'Snap table photo to fill cards, then fold or raise'}
-          {step === 'showdown' && (
-            betAction === 'fold'
-              ? `Folded — log dealer cards 2–5 (${dealerRest.length}/4) for tracking`
-              : `Log dealer cards 2–5 (${dealerRest.length}/4)`
-          )}
-          {step === 'done' && (resultText ?? 'Hand complete')}
-        </p>
-      </div>
-
-      {showdownPreview?.valid && step === 'showdown' && (
-        <div className="mb-2 py-2 px-3 rounded-lg bg-black/40 border border-white/10 text-center">
-          <p className="text-[10px] text-white/40 uppercase tracking-wide">Projected result</p>
-          <p className="text-sm text-white/90 mt-0.5">{showdownPreview.summary}</p>
-        </div>
-      )}
-
-      {(validationError || tableDup) && (
-        <div className="mb-2 py-2 px-3 rounded-lg bg-red-950/80 border border-red-500/40 text-center">
-          <p className="text-xs text-red-300">{validationError ?? tableDup}</p>
-        </div>
-      )}
-
-      {(step === 'dealer-up' || step === 'player' || step === 'bet' || step === 'showdown') && (
-        <div className="mb-2">
-          <PhotoCapture
-            compact
-            expectedCount={
-              step === 'dealer-up' ? 1
-                : step === 'showdown' ? 4
-                  : step === 'bet' || step === 'player' ? 6
-                    : 5
-            }
-            slotIds={
-              step === 'dealer-up' ? ['d1']
-                : step === 'showdown' ? dealerRestIds
-                  : step === 'bet' || step === 'player' ? tableSlotIds
-                    : playerIds
-            }
-            context={
-              step === 'dealer-up' ? 'dealer-up'
-                : step === 'showdown' ? 'dealer-rest'
-                  : step === 'bet' || step === 'player' ? 'table'
-                    : 'player-hand'
-            }
-            onCardsDetected={handlePhotoCards}
-            label={
-              step === 'dealer-up'
-                ? 'Photo: dealer up-card'
-                : step === 'showdown'
-                  ? 'Photo: dealer cards 2–5'
-                  : step === 'bet' || step === 'player'
-                    ? 'Photo: snap table (dealer + your 5)'
-                    : 'Photo: your 5 cards'
-            }
-          />
-        </div>
-      )}
-
-      <div className="rounded-3xl bg-gradient-to-b from-felt to-felt-dark border-4 border-amber-900/40 shadow-2xl p-4 mb-2">
-        <div className="mb-5">
-          <p className="text-xs text-center text-white/50 uppercase mb-2">
-            Dealer {dealerUp && <span className="text-gold normal-case">· up: {formatRankDisplay(dealerUp.rank)}{dealerUp.suit[0]}</span>}
-          </p>
-          {dealerEval && (
-            <p className="text-center text-sm text-white/70 mb-2">
-              {dealerEval.label}
-              <span className={`ml-2 text-xs ${dealerQualifiesHand ? 'text-emerald-400' : 'text-amber-400/80'}`}>
-                {dealerQualifiesHand ? '· Qualifies ✓' : '· No qualify (needs A-K)'}
-              </span>
-            </p>
-          )}
-          {!dealerEval && step === 'showdown' && dealerRest.length > 0 && (
-            <p className="text-center text-xs text-white/40 mb-2">
-              {dealerRest.length}/4 hole cards · hand rank appears at 5
-            </p>
-          )}
-          <div className="flex justify-center gap-2">
-            <PlayingCard
-              card={dealerUp}
-              label="Up"
-              onClick={canPick('d1') ? () => setPickerSlot({ id: 'd1', label: 'Dealer up-card' }) : undefined}
-              selected={step === 'dealer-up' && !dealerUp}
-              size="sm"
-            />
-            {dealerRestIds.map((id, i) =>
-              step === 'showdown' || step === 'done' || state.cards[id] ? (
-                <PlayingCard
-                  key={id}
-                  card={state.cards[id] ?? null}
-                  label={`D${i + 2}`}
-                  onClick={canPick(id) ? () => setPickerSlot({ id, label: `Dealer card ${i + 2}` }) : undefined}
-                  selected={step === 'showdown' && !state.cards[id]}
-                  size="sm"
-                />
-              ) : (
-                <CardBack key={id} size="sm" />
-              )
-            )}
-          </div>
-        </div>
-
-        <div>
-          <p className="text-xs text-center text-gold uppercase font-semibold mb-2">
-            Your Hand {playerCards.length === 5 && '✓'}
-          </p>
-          {playerEval && <p className="text-center text-sm text-white/70 mb-2">{playerEval.label}</p>}
-          <div className="flex justify-center gap-2 flex-wrap">
-            {game.playerSlots.map((slot, i) => (
-              <PlayingCard
-                key={slot.id}
-                card={state.cards[slot.id] ?? null}
-                label={slot.label}
-                onClick={canPick(slot.id) ? () => setPickerSlot({ id: slot.id, label: slot.label }) : undefined}
-                selected={step === 'player' && !state.cards[slot.id]}
-                delay={i * 60}
-                size="md"
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <InlineBetStrip game={game} rules={rules} onChange={onUpdateRules} />
-
-      {step === 'player' && (
-        <div className="mt-2">
-          <CaribbeanAnalysisBar
-            analysis={betAnalysis}
-            aiAdvice={lastAiAdvice}
-            loading={aiLoading}
-            ante={ante}
-            raiseAmt={raiseAmt}
-            cardsReady={cardsReady}
-            onOpenSettings={onOpenSettings}
-          />
-        </div>
-      )}
-
-      {step === 'bet' && betAnalysis && (
-        <div className="mt-1 px-2 text-center text-[10px] text-white/40">
-          {shouldRaise
-            ? raiseReason || 'Strategy says raise for max value'
-            : `Fold saves ${formatMoneyWithSymbol(raiseAmt)} raise exposure`}
-        </div>
-      )}
-
-      {step === 'done' && resultText && (
-        <div className="mt-3 p-4 rounded-xl bg-black/40 border border-emerald-500/30">
-          <p className="font-bold text-sm">{resultText}</p>
-          {playerEval && (
-            <p className="text-xs text-white/60 mt-1">Your hand: {playerEval.label}</p>
-          )}
-          {dealerEval && (
-            <p className="text-xs text-white/60 mt-0.5">
-              Dealer: {dealerEval.label}
-              {dealerQualifiesHand ? ' · qualifies' : ' · no qualify'}
-            </p>
-          )}
-          {betAction && (
-            <p className="text-xs text-white/50 mt-1">
-              You {betAction === 'raise' ? `raised ${formatMoneyWithSymbol(raiseAmt)}` : 'folded'}
-              {lastAiAdvice && (
-                <span className={didFollowAi(lastAiAdvice, betAction) ? ' text-emerald-400' : ' text-amber-400'}>
-                  {' · '}{didFollowAi(lastAiAdvice, betAction) ? 'Followed AI ✓' : 'Deviated from AI'}
-                </span>
-              )}
-            </p>
-          )}
-        </div>
-      )}
-
-      <HandTrendsPanel
-        hands={loggedHands}
-        trends={trends}
-        cloudSync={isSupabaseConfigured()}
-        defaultCollapsed
-        onDeleteHand={handleDeleteHand}
-        onClearAll={handleClearAllHands}
-      />
-
-      <div className="fixed bottom-0 inset-x-0 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent">
-        <div className="max-w-lg mx-auto space-y-2">
-          {showAnalysis && cardsReady && step === 'bet' && (
-            <CaribbeanAnalysisBar
-              analysis={betAnalysis}
-              aiAdvice={lastAiAdvice}
-              loading={aiLoading}
-              ante={ante}
-              raiseAmt={raiseAmt}
-              cardsReady
-              onOpenSettings={onOpenSettings}
-            />
-          )}
-          {step === 'dealer-up' && !dealerUp && (
-            <p className="text-center text-sm text-gold py-3">👆 Tap the dealer up-card above</p>
-          )}
-          {step === 'bet' && (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => handleBet('fold')}
-                disabled={!betReady}
-                className="flex-1 py-4 rounded-xl bg-red-600 font-bold text-lg disabled:opacity-40"
-              >
-                Fold
-              </button>
-              <button
-                type="button"
-                onClick={() => handleBet('raise')}
-                disabled={!betReady}
-                className="flex-[1.4] py-4 rounded-xl bg-gold text-slate-900 font-bold text-lg disabled:opacity-40"
-              >
-                Raise {formatMoneyWithSymbol(raiseAmt)}
-              </button>
+    <>
+      <div className="caribbean-shell fixed inset-0 z-30 flex justify-center overflow-hidden">
+        <div className="w-full max-w-lg h-full flex flex-col overflow-hidden px-3 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
+          {/* Header */}
+          <header className="shrink-0 pt-1 pb-0.5">
+            <div className="flex items-center justify-between gap-2">
+              <button type="button" onClick={onBack} className="text-xs text-white/50 hover:text-white shrink-0">← Exit</button>
+              <span className="text-xs font-bold truncate">🏝️ Caribbean Stud</span>
+              <div className="flex items-center gap-1 shrink-0">
+                {onOpenSettings && (
+                  <button type="button" onClick={onOpenSettings} className="w-8 h-8 rounded-full bg-white/10 text-sm" aria-label="Settings">⚙️</button>
+                )}
+                <button type="button" onClick={handleNextHand} className="text-xs text-gold font-semibold">New →</button>
+              </div>
             </div>
-          )}
-          {step === 'showdown' && (
-            <div className="text-center py-1">
-              <p className="text-sm text-white/70">
-                {betAction === 'fold' ? 'Folded — ' : 'Raised — '}
-                tap dealer cards D2–D5 ({dealerRest.length}/4)
-              </p>
-              {betAction === 'fold' && dealerRest.length < 4 && (
+            <CaribbeanSessionBar session={session} compact />
+            <div className={`py-1 px-2 rounded-lg text-center border ${bannerAlert ? 'bg-red-950/70 border-red-500/40' : 'bg-gold/15 border-gold/40'}`}>
+              <p className="text-gold font-bold text-[11px] leading-tight">{STEP_LABELS[step]}</p>
+              <p className={`text-[10px] leading-tight truncate mt-0.5 ${bannerAlert ? 'text-red-300' : 'text-white/55'}`}>{bannerText}</p>
+            </div>
+          </header>
+
+          {/* Table — fills remaining space, no scroll */}
+          <main className="flex-1 min-h-0 flex flex-col justify-center overflow-hidden py-1">
+            <div className="rounded-2xl bg-gradient-to-b from-felt to-felt-dark border-2 border-amber-900/40 shadow-xl p-2 shrink min-h-0">
+              <div className="mb-2">
+                <p className="text-[9px] text-center text-white/50 uppercase mb-1">
+                  Dealer {dealerUp && <span className="text-gold normal-case">· {formatRankDisplay(dealerUp.rank)}{dealerUp.suit[0]}</span>}
+                </p>
+                {dealerEval && (
+                  <p className="text-center text-[10px] text-white/70 mb-1 truncate">
+                    {dealerEval.label}
+                    <span className={`ml-1 ${dealerQualifiesHand ? 'text-emerald-400' : 'text-amber-400/80'}`}>
+                      {dealerQualifiesHand ? '· Q ✓' : '· no Q'}
+                    </span>
+                  </p>
+                )}
+                <div className="flex justify-center gap-0.5 flex-nowrap">
+                  <PlayingCard
+                    card={dealerUp}
+                    label="Up"
+                    onClick={canPick('d1') ? () => setPickerSlot({ id: 'd1', label: 'Dealer up-card' }) : undefined}
+                    selected={step === 'dealer-up' && !dealerUp}
+                    size="xs"
+                  />
+                  {dealerRestIds.map((id, i) =>
+                    step === 'showdown' || step === 'done' || state.cards[id] ? (
+                      <PlayingCard
+                        key={id}
+                        card={state.cards[id] ?? null}
+                        label={`D${i + 2}`}
+                        onClick={canPick(id) ? () => setPickerSlot({ id, label: `Dealer card ${i + 2}` }) : undefined}
+                        selected={step === 'showdown' && !state.cards[id]}
+                        size="xs"
+                      />
+                    ) : (
+                      <CardBack key={id} size="xs" />
+                    )
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-[9px] text-center text-gold uppercase font-semibold mb-1">
+                  Your Hand {playerCards.length === 5 && '✓'}
+                </p>
+                {playerEval && <p className="text-center text-[10px] text-white/70 mb-1 truncate">{playerEval.label}</p>}
+                <div className="flex justify-center gap-1 flex-nowrap">
+                  {game.playerSlots.map((slot, i) => (
+                    <PlayingCard
+                      key={slot.id}
+                      card={state.cards[slot.id] ?? null}
+                      label={slot.label}
+                      onClick={canPick(slot.id) ? () => setPickerSlot({ id: slot.id, label: slot.label }) : undefined}
+                      selected={step === 'player' && !state.cards[slot.id]}
+                      delay={i * 60}
+                      size="sm"
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </main>
+
+          {/* Bottom dock — actions, analysis, photo; no page scroll */}
+          <footer className="shrink-0 space-y-1.5 pt-1 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent">
+            <InlineBetStrip game={game} rules={rules} onChange={onUpdateRules} compact />
+
+            {showAnalysis && (
+              <CaribbeanAnalysisBar
+                analysis={betAnalysis}
+                aiAdvice={lastAiAdvice}
+                loading={aiLoading}
+                ante={ante}
+                raiseAmt={raiseAmt}
+                cardsReady={cardsReady}
+                onOpenSettings={onOpenSettings}
+                dense
+              />
+            )}
+
+            {step === 'dealer-up' && !dealerUp && (
+              <p className="text-center text-xs text-gold py-1">👆 Tap dealer up-card above</p>
+            )}
+
+            {step === 'bet' && (
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => dealerUp && finalizeHand('fold', [dealerUp, ...dealerRest])}
-                  className="mt-1 text-[10px] text-white/40 underline hover:text-white/60"
+                  onClick={() => handleBet('fold')}
+                  disabled={!betReady}
+                  className="flex-1 py-3 rounded-xl bg-red-600 font-bold text-base disabled:opacity-40"
                 >
-                  Finish without full dealer hand
+                  Fold
                 </button>
-              )}
-              {betAction === 'raise' && dealerRest.length < 4 && (
-                <p className="mt-1 text-[10px] text-amber-400">Log all 4 dealer cards to score this raise</p>
-              )}
-            </div>
-          )}
-          {step === 'done' && (
-            <button type="button" onClick={handleNextHand} className="w-full py-4 rounded-xl bg-gold text-slate-900 font-bold text-lg">Next Hand →</button>
-          )}
-          <p className="text-center text-[10px] text-white/30 mt-2">ante {formatMoneyWithSymbol(ante)} · raise {formatMoneyWithSymbol(raiseAmt)}</p>
+                <button
+                  type="button"
+                  onClick={() => handleBet('raise')}
+                  disabled={!betReady}
+                  className="flex-[1.4] py-3 rounded-xl bg-gold text-slate-900 font-bold text-base disabled:opacity-40"
+                >
+                  Raise {formatMoneyWithSymbol(raiseAmt)}
+                </button>
+              </div>
+            )}
+
+            {step === 'showdown' && (
+              <div className="text-center py-0.5">
+                {betAction === 'fold' && dealerRest.length < 4 && (
+                  <button
+                    type="button"
+                    onClick={() => dealerUp && finalizeHand('fold', [dealerUp, ...dealerRest])}
+                    className="text-[10px] text-white/40 underline hover:text-white/60"
+                  >
+                    Finish without full dealer hand
+                  </button>
+                )}
+              </div>
+            )}
+
+            {step === 'done' && (
+              <>
+                {resultText && playerEval && (
+                  <p className="text-[10px] text-center text-white/50 truncate px-1">
+                    {playerEval.label}
+                    {dealerEval && ` · Dlr: ${dealerEval.label}`}
+                    {betAction && ` · ${betAction === 'raise' ? 'raised' : 'folded'}`}
+                  </p>
+                )}
+                <button type="button" onClick={handleNextHand} className="w-full py-3 rounded-xl bg-gold text-slate-900 font-bold text-base">
+                  Next Hand →
+                </button>
+                <HandTrendsPanel
+                  hands={loggedHands}
+                  trends={trends}
+                  cloudSync={isSupabaseConfigured()}
+                  defaultCollapsed
+                  onDeleteHand={handleDeleteHand}
+                  onClearAll={handleClearAllHands}
+                />
+              </>
+            )}
+
+            {showPhoto && (
+              <PhotoCapture
+                compact
+                expectedCount={
+                  step === 'dealer-up' ? 1
+                    : step === 'showdown' ? 4
+                      : step === 'bet' || step === 'player' ? 6
+                        : 5
+                }
+                slotIds={
+                  step === 'dealer-up' ? ['d1']
+                    : step === 'showdown' ? dealerRestIds
+                      : step === 'bet' || step === 'player' ? tableSlotIds
+                        : playerIds
+                }
+                context={
+                  step === 'dealer-up' ? 'dealer-up'
+                    : step === 'showdown' ? 'dealer-rest'
+                      : step === 'bet' || step === 'player' ? 'table'
+                        : 'player-hand'
+                }
+                onCardsDetected={handlePhotoCards}
+                label={photoLabel}
+              />
+            )}
+          </footer>
         </div>
       </div>
 
@@ -543,6 +497,6 @@ export function CaribbeanHandView({
           onClose={() => setPickerSlot(null)}
         />
       )}
-    </div>
+    </>
   )
 }

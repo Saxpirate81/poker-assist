@@ -62,17 +62,19 @@ export function PhotoCapture({
 
   if (compact) {
     return (
-      <div className="mb-1">
+      <div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
             disabled={loading || !hasAi}
-            className="flex-1 py-2.5 px-3 rounded-lg bg-gold/20 hover:bg-gold/30 text-gold text-sm font-semibold transition-colors disabled:opacity-40 border border-gold/40"
+            className="flex-1 py-2 px-2 rounded-lg bg-gold/20 hover:bg-gold/30 text-gold text-xs font-semibold transition-colors disabled:opacity-40 border border-gold/40 truncate"
           >
             {buttonLabel}
           </button>
-          {!hasAi && <span className="text-[10px] text-amber-400 shrink-0">⚙️ key</span>}
+          {!hasAi && (
+            <span className="text-[10px] text-amber-400 shrink-0">⚙️ key</span>
+          )}
           <input
             ref={inputRef}
             type="file"
@@ -86,8 +88,8 @@ export function PhotoCapture({
             }}
           />
         </div>
-        {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
-        {success && <p className="mt-1 text-xs text-emerald-400 font-medium">{success}</p>}
+        {error && <p className="mt-0.5 text-[10px] text-red-400 truncate">{error}</p>}
+        {success && <p className="mt-0.5 text-[10px] text-emerald-400 font-medium truncate">{success}</p>}
       </div>
     )
   }
