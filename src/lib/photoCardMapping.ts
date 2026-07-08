@@ -27,14 +27,15 @@ function stripTableDuplicates(dealerUp: Card | null, playerCards: Card[]): Card[
   return withoutDupes.filter(c => cardIdentity(c) !== upId)
 }
 
-function tableIdentities(existing: Record<string, Card | null>, excludeSlotIds: string[] = []): Set<string> {
-  const exclude = new Set(excludeSlotIds)
+function playerIdentities(existing: Record<string, Card | null>): Set<string> {
   const ids = new Set<string>()
   for (const [slotId, card] of Object.entries(existing)) {
-    if (card && !exclude.has(slotId)) ids.add(cardIdentity(card))
+    if (card && slotId.startsWith('p')) ids.add(cardIdentity(card))
   }
   return ids
 }
+
+const ALL_DEALER_SLOTS = ['d1', 'd2', 'd3', 'd4', 'd5']
 
 function findSlotWithIdentity(
   cards: Record<string, Card | null>,
@@ -160,6 +161,10 @@ export function parseVisionResponse(text: string, context: PhotoReadContext): Pa
   }
   if (context === 'dealer-rest') {
     const obj = extractJsonObject(text)
+    if (obj && 'dealerCards' in obj) {
+      const all = dedupeCards(parseCardList(obj.dealerCards))
+      return { dealerUp: all[0] ?? null, playerCards: [], flat: all }
+    }
     if (obj && 'dealerHoleCards' in obj) {
       const hole = dedupeCards(parseCardList(obj.dealerHoleCards))
       return { dealerUp: null, playerCards: [], flat: hole }
@@ -232,12 +237,20 @@ export function mapDetectedCardsToSlots(
 
   if (context === 'dealer-rest') {
     const holeSlotIds = slotIds.filter(id => /^d[2-5]$/.test(id))
-    const taken = tableIdentities(existing, holeSlotIds)
-    const cards = dedupeCards(parsed.flat).filter(c => !taken.has(cardIdentity(c)))
-    // Order on felt may differ — fill D2–D5 with unique hole cards (order doesn't affect score)
-    holeSlotIds.forEach((id, i) => {
-      if (cards[i]) mapping[id] = cards[i]!
-    })
+    const players = playerIdentities(existing)
+    const cards = dedupeCards(parsed.flat).filter(c => !players.has(cardIdentity(c)))
+
+    if (cards.length >= 5) {
+      // Full dealer row visible (up + 4 hole) — map all 5, any order
+      ALL_DEALER_SLOTS.forEach((id, i) => {
+        if (cards[i]) mapping[id] = cards[i]!
+      })
+    } else {
+      // 4 or fewer — fill hole slots D2–D5 only (do not drop cards that match existing d1)
+      holeSlotIds.forEach((id, i) => {
+        if (cards[i]) mapping[id] = cards[i]!
+      })
+    }
     return mapping
   }
 

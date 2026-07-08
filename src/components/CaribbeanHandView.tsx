@@ -281,17 +281,18 @@ export function CaribbeanHandView({
         : step === 'bet' ? (shouldRaise ? (raiseReason || 'Strategy says raise') : `Fold saves ${formatMoneyWithSymbol(raiseAmt)}`)
           : step === 'showdown'
             ? (betAction === 'fold'
-              ? `Snap dealer final 4 (${dealerRest.length}/4) or tap`
-              : `Snap dealer final 4 (${dealerRest.length}/4) · ${showdownPreview?.valid ? 'scoring…' : 'tap or photo'}`)
+              ? `Snap dealer hand (${dealerRest.length}/4 hole) or tap`
+              : `Snap dealer hand (${dealerRest.length}/4 hole) · ${showdownPreview?.valid ? 'scoring…' : 'tap or photo'}`)
             : (resultText ?? 'Hand complete')
 
   const bannerText = validationError ?? tableDup ?? stepHint
   const bannerAlert = !!(validationError || tableDup)
   const showPhoto = step === 'dealer-up' || step === 'player' || step === 'bet' || step === 'showdown'
 
+  const dealerSlotIds = ['d1', ...dealerRestIds]
   const photoConfig =
     step === 'showdown'
-      ? { context: 'dealer-rest' as const, expected: 4, slots: dealerRestIds, label: 'Photo: dealer final 4' }
+      ? { context: 'dealer-rest' as const, expected: 5, slots: dealerSlotIds, label: 'Photo: dealer 5 cards' }
       : { context: 'table' as const, expected: 6, slots: tableSlotIds, label: 'Photo: snap all 6 cards' }
 
   return (

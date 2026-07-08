@@ -36,12 +36,12 @@ Return ONLY: [{"rank":"...","suit":"hearts"|"diamonds"|"clubs"|"spades"}]
 Use T for ten.`
   }
   if (context === 'dealer-rest') {
-    return `Caribbean Stud showdown photo. The dealer's final 4 hole cards (D2–D5) are now face-up or revealed.
-Find all ${expectedCount} dealer hole cards. Physical order on the table may vary — return cards in ANY order.
+    return `Caribbean Stud showdown photo. Find ALL face-up dealer cards (usually 5 total: up-card + 4 hole cards).
+Physical order may vary — return every dealer card you see in ANY order.
 Return ONLY valid JSON (no markdown):
-{"dealerHoleCards":[{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}, ...]}
-Must include all ${expectedCount} unique cards. Use T for ten.
-Do NOT include the dealer up-card or any player cards.`
+{"dealerCards":[{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}, ...]}
+Include all 5 dealer cards when visible (minimum 4 if only hole cards shown). Use T for ten.
+Do NOT include any player cards.`
   }
   return `Find exactly ${expectedCount} PLAYER hole cards in this Caribbean Stud photo (the player's row of 5 cards), left to right.
 Do NOT include dealer cards.
@@ -167,11 +167,13 @@ export async function recognizeCardsFromPhotoGemini(
     if (context === 'table' && total >= 6) {
       return { cards: result.cards, parsed: result.parsed }
     }
-    if (context === 'dealer-rest' && total >= 4) {
+    if (context === 'dealer-rest' && total >= 5) {
       return { cards: result.cards, parsed: result.parsed }
     }
-    if (context === 'dealer-rest' && total >= 3 && !best) {
-      best = { cards: result.cards, parsed: result.parsed }
+    if (context === 'dealer-rest' && total >= 4) {
+      if (!best || total > best.cards.length) {
+        best = { cards: result.cards, parsed: result.parsed }
+      }
     }
     if (total >= expectedCount) {
       return { cards: result.cards, parsed: result.parsed }
@@ -196,7 +198,7 @@ export async function recognizeCardsFromPhotoGemini(
     parsed: { dealerUp: null, playerCards: [], flat: [] },
     error: lastError.includes('Could not read')
       ? lastError
-      : `Only found ${best?.cards.length ?? 0} card(s). Frame all 5 player cards (and dealer if needed) and retry.`,
+      : `Only found ${best?.cards.length ?? 0} card(s). Frame the full dealer hand (5 cards) or all 4 hole cards and retry.`,
   }
 }
 

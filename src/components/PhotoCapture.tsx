@@ -58,7 +58,8 @@ export function PhotoCapture({
         return
       }
       const playerMapped = slotIds.filter(id => id.startsWith('p') && mapping[id]).length
-      const dealerHoleMapped = slotIds.filter(id => /^d[2-5]$/.test(id) && mapping[id]).length
+      const dealerHoleMapped = ['d2', 'd3', 'd4', 'd5'].filter(id => mapping[id] || existingCards[id]).length
+      const mergedDealer = { ...existingCards, ...mapping }
 
       if (context === 'table') {
         if (playerMapped > 0 && playerMapped < 3) {
@@ -70,9 +71,12 @@ export function PhotoCapture({
           return
         }
       }
-      if (context === 'dealer-rest' && dealerHoleMapped < 3) {
-        setError(`Only ${dealerHoleMapped}/4 dealer cards — snap all revealed hole cards.`)
-        return
+      if (context === 'dealer-rest') {
+        const holesFilled = ['d2', 'd3', 'd4', 'd5'].filter(id => mergedDealer[id]).length
+        if (holesFilled < 4) {
+          setError(`Only ${holesFilled}/4 dealer hole cards — include full dealer row in photo.`)
+          return
+        }
       }
       if (context === 'player-hand' && playerMapped < 3) {
         setError(`Only mapped ${playerMapped}/5 player cards — include full hand in photo.`)
@@ -82,7 +86,7 @@ export function PhotoCapture({
       setSuccess(
         `✓ ${n} card${n === 1 ? '' : 's'} loaded`
         + (playerMapped > 0 ? ` (${playerMapped} player)` : '')
-        + (dealerHoleMapped > 0 ? ` (${dealerHoleMapped} dealer)` : '')
+        + (context === 'dealer-rest' ? ` (${['d2', 'd3', 'd4', 'd5'].filter(id => mergedDealer[id]).length}/4 hole)` : dealerHoleMapped > 0 ? ` (${dealerHoleMapped} dealer)` : '')
         + (warnings.length ? ` · ${warnings.length} dup skipped` : '')
       )
       setTimeout(() => setSuccess(null), 3000)
