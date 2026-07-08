@@ -53,9 +53,31 @@ export function parseCard(input: string): Card | null {
     H: 'hearts', D: 'diamonds', C: 'clubs', S: 'spades',
     '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs', '♠': 'spades',
   }
-  const suit = suitMap[match[2].toUpperCase()] ?? suitMap[match[2]]
+  const suitChar = match[2].toUpperCase()
+  const suit = suitMap[suitChar] ?? suitMap[match[2]]
   if (!RANKS.includes(rankStr as Rank) || !suit) return null
   return { rank: rankStr as Rank, suit }
+}
+
+/** Normalize AI vision JSON (10→T, suit aliases, etc.). */
+export function normalizeCardFromAi(raw: { rank?: string; suit?: string }): Card | null {
+  if (!raw.rank || !raw.suit) return null
+
+  let rank = String(raw.rank).trim().toUpperCase()
+  if (rank === '10') rank = 'T'
+  if (!RANKS.includes(rank as Rank)) return null
+
+  const suitKey = String(raw.suit).trim().toLowerCase()
+  const suitMap: Record<string, Suit> = {
+    hearts: 'hearts', heart: 'hearts', h: 'hearts', '♥': 'hearts',
+    diamonds: 'diamonds', diamond: 'diamonds', d: 'diamonds', '♦': 'diamonds',
+    clubs: 'clubs', club: 'clubs', c: 'clubs', '♣': 'clubs',
+    spades: 'spades', spade: 'spades', s: 'spades', '♠': 'spades',
+  }
+  const suit = suitMap[suitKey] ?? (SUITS.includes(suitKey as Suit) ? suitKey as Suit : null)
+  if (!suit) return null
+
+  return { rank: rank as Rank, suit }
 }
 
 export type HandRank =

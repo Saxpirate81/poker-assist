@@ -16,7 +16,8 @@ import {
 import { getRaiseReason, shouldCaribbeanRaise } from './caribbeanFlow'
 import { formatMoneyWithSymbol } from './money'
 import { getAiProvider, getOpenAiApiKey, setOpenAiApiKey } from './config'
-import { buildCaribbeanPrompt, getGeminiAdvice, recognizeCardsFromPhotoGemini } from './geminiService'
+import { buildCaribbeanPrompt, getGeminiAdvice, recognizeCardsFromPhotoGemini, type PhotoReadContext } from './geminiService'
+import { normalizeCardFromAi } from './pokerEval'
 
 export function getApiKey(): string {
   return getOpenAiApiKey()
@@ -431,9 +432,10 @@ Respond ONLY with JSON: {"verdict":"good|bad|neutral|warning","headline":"short"
 
 export async function recognizeCardsFromPhoto(
   imageBase64: string,
-  expectedCount: number
+  expectedCount: number,
+  context: PhotoReadContext = 'player-hand'
 ): Promise<{ cards: Card[]; error?: string }> {
-  const gemini = await recognizeCardsFromPhotoGemini(imageBase64, expectedCount)
+  const gemini = await recognizeCardsFromPhotoGemini(imageBase64, expectedCount, context)
   if (gemini.cards.length > 0) return gemini
   if (gemini.error && !getOpenAiApiKey()) return gemini
 
@@ -479,8 +481,8 @@ Use T for ten. Left-to-right order. If unsure, omit that card.`,
     const jsonMatch = content.match(/\[[\s\S]*\]/)
     if (!jsonMatch) return { cards: [], error: 'Could not parse cards from photo.' }
 
-    const parsed = JSON.parse(jsonMatch[0]) as Card[]
-    return { cards: parsed.filter(c => c.rank && c.suit) }
+    const parsed = JSON.parse(jsonMatch[0]) as { rank?: string; suit?: string }[]
+    return { cards: parsed.map(normalizeCardFromAi).filter((c): c is Card => !!c) }
   } catch (e) {
     return { cards: [], error: e instanceof Error ? e.message : 'Recognition failed' }
   }

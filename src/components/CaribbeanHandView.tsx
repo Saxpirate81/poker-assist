@@ -69,6 +69,7 @@ export function CaribbeanHandView({
   const [loggedHands, setLoggedHands] = useState<LoggedCaribbeanHand[]>([])
   const [lastAiAdvice, setLastAiAdvice] = useState<(AiAdvice & { provider?: string }) | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
+  const [photoRefresh, setPhotoRefresh] = useState(0)
   const scoredRef = useRef(false)
   const aiFetchedForHand = useRef(false)
 
@@ -110,7 +111,7 @@ export function CaribbeanHandView({
       setLastAiAdvice(advice)
       setAiLoading(false)
     })
-  }, [playerCards.length, dealerUp, step])
+  }, [playerCards.length, dealerUp, step, photoRefresh])
 
   const finalizeHand = async (action: 'raise' | 'fold', allDealer: Card[]) => {
     if (scoredRef.current) return
@@ -201,6 +202,15 @@ export function CaribbeanHandView({
 
   const playerCardsUsed = playerIds.map(id => state.cards[id]).filter((c): c is Card => !!c)
   const dealerCardsUsed = dealerSlotIds.map(id => state.cards[id]).filter((c): c is Card => !!c)
+  const handlePhotoCards = (mapping: Record<string, Card>) => {
+    onUpdateCards({ ...state.cards, ...mapping })
+    aiFetchedForHand.current = false
+    setLastAiAdvice(null)
+    setPhotoRefresh(n => n + 1)
+  }
+
+  const tableSlotIds = ['d1', ...playerIds]
+
   const pickerUsedCards = pickerSlot
     ? (dealerSlotIds.includes(pickerSlot.id) ? dealerCardsUsed : playerCardsUsed)
     : []
@@ -219,8 +229,8 @@ export function CaribbeanHandView({
         <p className="text-gold font-bold text-sm">{STEP_LABELS[step]}</p>
         <p className="text-white/60 text-xs mt-0.5">
           {step === 'dealer-up' && 'Tap dealer up-card or use photo read'}
-          {step === 'player' && `${playerCards.length}/5 cards · odds appear at 5`}
-          {step === 'bet' && 'Review odds below — fold or raise'}
+          {step === 'player' && `${playerCards.length}/5 cards · snap table photo or tap cards`}
+          {step === 'bet' && 'Snap table photo to fill cards, then fold or raise'}
           {step === 'showdown' && (
             betAction === 'fold'
               ? `Folded — log dealer cards 2–5 (${dealerRest.length}/4) for tracking`
@@ -230,19 +240,37 @@ export function CaribbeanHandView({
         </p>
       </div>
 
-      {(step === 'dealer-up' || step === 'player' || step === 'showdown') && (
-        <div className="mb-2 relative">
+      {(step === 'dealer-up' || step === 'player' || step === 'bet' || step === 'showdown') && (
+        <div className="mb-2">
           <PhotoCapture
             compact
-            expectedCount={step === 'dealer-up' ? 1 : step === 'showdown' ? 4 : 5}
-            slotIds={step === 'dealer-up' ? ['d1'] : step === 'showdown' ? dealerRestIds : playerIds}
-            onCardsDetected={m => onUpdateCards({ ...state.cards, ...m })}
+            expectedCount={
+              step === 'dealer-up' ? 1
+                : step === 'showdown' ? 4
+                  : step === 'bet' || step === 'player' ? 6
+                    : 5
+            }
+            slotIds={
+              step === 'dealer-up' ? ['d1']
+                : step === 'showdown' ? dealerRestIds
+                  : step === 'bet' || step === 'player' ? tableSlotIds
+                    : playerIds
+            }
+            context={
+              step === 'dealer-up' ? 'dealer-up'
+                : step === 'showdown' ? 'dealer-rest'
+                  : step === 'bet' || step === 'player' ? 'table'
+                    : 'player-hand'
+            }
+            onCardsDetected={handlePhotoCards}
             label={
               step === 'dealer-up'
                 ? 'Photo: dealer up-card'
                 : step === 'showdown'
                   ? 'Photo: dealer cards 2–5'
-                  : 'Photo: your 5 cards'
+                  : step === 'bet' || step === 'player'
+                    ? 'Photo: snap table (dealer + your 5)'
+                    : 'Photo: your 5 cards'
             }
           />
         </div>
