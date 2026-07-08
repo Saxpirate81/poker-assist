@@ -1,0 +1,18 @@
+{
+  "name": "Poker Assist",
+  "short_name": "Poker Assist",
+  "description": "Caribbean Stud hand logger with AI coaching",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a1628",
+  "theme_color": "#0d5c2e",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

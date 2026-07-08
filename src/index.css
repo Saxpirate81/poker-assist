@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Segoe UI", system-ui, sans-serif;
+  --color-felt: #0d5c2e;
+  --color-felt-dark: #084422;
+  --color-gold: #f5c842;
+  --color-gold-dark: #c9a020;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  font-family: var(--font-display);
+  background: linear-gradient(160deg, #0a1628 0%, #132a4a 40%, #0d5c2e 100%);
+  color: #f0f4f8;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+.scroll-picker {
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scroll-picker-item {
+  scroll-snap-align: center;
+}
+
+@keyframes deal-in {
+  from {
+    opacity: 0;
+    transform: translateY(-24px) rotate(-8deg) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(0) scale(1);
+  }
+}
+
+.card-deal {
+  animation: deal-in 0.35s ease-out both;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 12px rgba(245, 200, 66, 0.3); }
+  50% { box-shadow: 0 0 24px rgba(245, 200, 66, 0.6); }
+}
+
+.ai-pulse {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
