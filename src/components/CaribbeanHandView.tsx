@@ -86,6 +86,15 @@ export function CaribbeanHandView({
   const raiseAmt = getSuggestedBetAmount(game, rules, 'raise')
   const progressive = ruleValue(rules, 'progressiveJackpot') ? Number(ruleValue(rules, 'progressiveBet') || 1) : 0
   const playerEval = playerCards.length === 5 ? evaluateHand(playerCards) : null
+  const allDealerCards = dealerUp && dealerRest.length === 4
+    ? [dealerUp, ...dealerRest]
+    : dealerUp && dealerRest.length > 0
+      ? [dealerUp, ...dealerRest]
+      : dealerUp
+        ? [dealerUp]
+        : []
+  const dealerEval = allDealerCards.length === 5 ? evaluateHand(allDealerCards) : null
+  const dealerQualifiesHand = allDealerCards.length === 5 ? dealerQualifies(allDealerCards) : false
   const shouldRaise = playerCards.length === 5 && shouldCaribbeanRaise(playerCards, dealerUp)
   const raiseReason = playerCards.length === 5 ? getRaiseReason(playerCards, playerEval, dealerUp) : ''
   const trends = computeTrends(loggedHands)
@@ -281,6 +290,19 @@ export function CaribbeanHandView({
           <p className="text-xs text-center text-white/50 uppercase mb-2">
             Dealer {dealerUp && <span className="text-gold normal-case">· up: {formatRankDisplay(dealerUp.rank)}{dealerUp.suit[0]}</span>}
           </p>
+          {dealerEval && (
+            <p className="text-center text-sm text-white/70 mb-2">
+              {dealerEval.label}
+              <span className={`ml-2 text-xs ${dealerQualifiesHand ? 'text-emerald-400' : 'text-amber-400/80'}`}>
+                {dealerQualifiesHand ? '· Qualifies ✓' : '· No qualify (needs A-K)'}
+              </span>
+            </p>
+          )}
+          {!dealerEval && step === 'showdown' && dealerRest.length > 0 && (
+            <p className="text-center text-xs text-white/40 mb-2">
+              {dealerRest.length}/4 hole cards · hand rank appears at 5
+            </p>
+          )}
           <div className="flex justify-center gap-2">
             <PlayingCard
               card={dealerUp}
@@ -354,6 +376,15 @@ export function CaribbeanHandView({
       {step === 'done' && resultText && (
         <div className="mt-3 p-4 rounded-xl bg-black/40 border border-emerald-500/30">
           <p className="font-bold text-sm">{resultText}</p>
+          {playerEval && (
+            <p className="text-xs text-white/60 mt-1">Your hand: {playerEval.label}</p>
+          )}
+          {dealerEval && (
+            <p className="text-xs text-white/60 mt-0.5">
+              Dealer: {dealerEval.label}
+              {dealerQualifiesHand ? ' · qualifies' : ' · no qualify'}
+            </p>
+          )}
           {betAction && (
             <p className="text-xs text-white/50 mt-1">
               You {betAction === 'raise' ? `raised ${formatMoneyWithSymbol(raiseAmt)}` : 'folded'}

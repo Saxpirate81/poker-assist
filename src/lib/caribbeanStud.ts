@@ -113,6 +113,13 @@ export interface CaribbeanOutcome {
   playerWon: boolean
 }
 
+export function describeDealerHand(cards: Card[]): { label: string; qualifies: boolean } | null {
+  if (cards.length !== 5) return null
+  const hand = evaluateHand(cards)
+  if (!hand) return null
+  return { label: hand.label, qualifies: dealerQualifies(cards) }
+}
+
 export function calculateOutcome(
   playerCards: Card[],
   dealerCards: Card[],
@@ -124,12 +131,16 @@ export function calculateOutcome(
   const totalIn = ante + progressiveBet + (action === 'raise' ? raiseAmount : 0)
 
   if (action === 'fold') {
+    const dealerInfo = describeDealerHand(dealerCards)
+    const summary = dealerInfo
+      ? `Folded — lost $${ante + progressiveBet} · Dealer: ${dealerInfo.label}${dealerInfo.qualifies ? ' (qualifies)' : ' (no qualify)'}`
+      : `Folded — lost $${ante + progressiveBet}`
     return {
-      summary: `Folded — lost $${ante + progressiveBet}`,
+      summary,
       netResult: -totalIn,
       anteWin: -ante,
       raiseWin: 0,
-      dealerQualified: false,
+      dealerQualified: dealerInfo?.qualifies ?? false,
       playerWon: false,
     }
   }
@@ -142,7 +153,7 @@ export function calculateOutcome(
     const received = ante * 2 + raiseAmount
     const net = received - totalIn
     return {
-      summary: `Dealer no qualify — won $${ante} on ante, raise pushes (+$${net})`,
+      summary: `Dealer no qualify (${dealerHand.label}) — won $${ante} on ante, raise pushes (+$${net})`,
       netResult: net,
       anteWin: ante,
       raiseWin: 0,

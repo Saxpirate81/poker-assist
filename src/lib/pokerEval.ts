@@ -257,7 +257,7 @@ function scoreFive(cards: Card[]): EvaluatedHand {
 
   return {
     rank: 'high_card',
-    label: `${HAND_LABELS.high_card} (${RANK_LABELS[cards[0].rank]})`,
+    label: `${HAND_LABELS.high_card} (${RANK_LABELS[RANKS.find(r => rankValue(r) === values[0]) ?? 'A']})`,
     score: values[0],
     tiebreakers: values,
   }
