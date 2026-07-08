@@ -84,6 +84,11 @@ export function parseVisionResponse(text: string, context: PhotoReadContext): Pa
     return { dealerUp: flat[0] ?? null, playerCards: [], flat }
   }
   if (context === 'dealer-rest') {
+    const obj = extractJsonObject(text)
+    if (obj && 'dealerHoleCards' in obj) {
+      const hole = parseCardList(obj.dealerHoleCards)
+      return { dealerUp: null, playerCards: [], flat: hole }
+    }
     return { dealerUp: null, playerCards: [], flat }
   }
   return { dealerUp: null, playerCards: flat, flat }
@@ -100,7 +105,7 @@ export function mapDetectedCardsToSlots(
   const hasDealer = !!existing['d1']
 
   if (context === 'table') {
-    if (parsed.dealerUp && !hasDealer) {
+    if (parsed.dealerUp) {
       mapping['d1'] = parsed.dealerUp
     }
     if (parsed.playerCards.length > 0) {
@@ -111,11 +116,11 @@ export function mapDetectedCardsToSlots(
     }
     // Legacy flat array fallback
     const cards = parsed.flat
-    if (cards.length === 6) {
+    if (cards.length >= 6) {
       mapping['d1'] = cards[0]!
-      playerSlotIds.forEach((id, i) => { mapping[id] = cards[i + 1]! })
+      playerSlotIds.forEach((id, i) => { if (cards[i + 1]) mapping[id] = cards[i + 1]! })
     } else if (cards.length === 5) {
-      playerSlotIds.forEach((id, i) => { mapping[id] = cards[i]! })
+      playerSlotIds.forEach((id, i) => { if (cards[i]) mapping[id] = cards[i]! })
     } else if (cards.length === 1 && !hasDealer) {
       mapping['d1'] = cards[0]!
     }
@@ -145,10 +150,11 @@ export function mapDetectedCardsToSlots(
 
 export function minCardsForContext(context: PhotoReadContext, expectedCount: number, hasDealer: boolean): number {
   if (context === 'table') {
-    if (hasDealer) return Math.min(5, expectedCount)
-    return Math.min(6, expectedCount)
+    // One table photo: prefer full 6; accept 5 player-only if dealer already logged
+    if (hasDealer) return 5
+    return 6
   }
   if (context === 'player-hand') return Math.min(3, expectedCount)
-  if (context === 'dealer-rest') return Math.min(2, expectedCount)
+  if (context === 'dealer-rest') return 4
   return 1
 }

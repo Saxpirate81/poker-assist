@@ -17,18 +17,18 @@ function geminiUrl(model: string, apiKey: string): string {
 
 function buildVisionPrompt(context: PhotoReadContext, expectedCount: number): string {
   if (context === 'table') {
-    return `Caribbean Stud poker table photo. Identify EVERY face-up playing card.
+    return `Caribbean Stud table photo — ONE shot must capture ALL 6 face-up cards.
 
-Layout: dealer row (often 1 face-up card) above/near dealer; player row below with 5 face-up cards.
+Layout: 1 dealer up-card (top/near dealer) + 5 player cards (bottom row), left to right.
 
 Return ONLY valid JSON (no markdown):
-{"dealerUp":{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}|null,"playerCards":[{"rank":"...","suit":"..."}, ...]}
+{"dealerUp":{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"},"playerCards":[{...},{...},{...},{...},{...}]}
 
 Rules:
-- playerCards MUST have all 5 player cards when visible (left-to-right).
-- dealerUp is the single dealer up-card; use null if not visible.
+- dealerUp: exactly 1 card (the dealer's face-up card).
+- playerCards: exactly 5 cards in the player's row.
 - Use T for ten (never "10"). Skip face-down cards.
-- Include every face-up card you can read — do not stop after the dealer card.`
+- Return all 6 cards in a single response — do not omit player cards.`
   }
   if (context === 'dealer-up') {
     return `Find the single face-up dealer card in this Caribbean Stud photo.
@@ -36,9 +36,11 @@ Return ONLY: [{"rank":"...","suit":"hearts"|"diamonds"|"clubs"|"spades"}]
 Use T for ten.`
   }
   if (context === 'dealer-rest') {
-    return `Find ${expectedCount} dealer hole cards (face-up or revealed) in this photo, left to right.
-Return ONLY a JSON array: [{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}]
-Use T for ten.`
+    return `Caribbean Stud showdown photo. The dealer's final 4 hole cards (D2–D5) are now face-up or revealed.
+Find all ${expectedCount} dealer hole cards left to right.
+Return ONLY valid JSON (no markdown):
+{"dealerHoleCards":[{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}, ...]}
+Must include all ${expectedCount} cards. Use T for ten. Do NOT include player cards or the dealer up-card.`
   }
   return `Find exactly ${expectedCount} PLAYER hole cards in this Caribbean Stud photo (the player's row of 5 cards), left to right.
 Do NOT include dealer cards.
@@ -161,8 +163,14 @@ export async function recognizeCardsFromPhotoGemini(
     if (context === 'table' && playerCount >= 5) {
       return { cards: result.cards, parsed: result.parsed }
     }
-    if (context === 'table' && options?.hasDealerUp && playerCount >= 3) {
+    if (context === 'table' && total >= 6) {
       return { cards: result.cards, parsed: result.parsed }
+    }
+    if (context === 'dealer-rest' && total >= 4) {
+      return { cards: result.cards, parsed: result.parsed }
+    }
+    if (context === 'dealer-rest' && total >= 3 && !best) {
+      best = { cards: result.cards, parsed: result.parsed }
     }
     if (total >= expectedCount) {
       return { cards: result.cards, parsed: result.parsed }

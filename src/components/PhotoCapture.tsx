@@ -54,16 +54,32 @@ export function PhotoCapture({
         return
       }
       const playerMapped = slotIds.filter(id => id.startsWith('p') && mapping[id]).length
+      const dealerHoleMapped = slotIds.filter(id => /^d[2-5]$/.test(id) && mapping[id]).length
+
+      if (context === 'table') {
+        if (playerMapped > 0 && playerMapped < 3) {
+          setError(`Only ${playerMapped}/5 player cards — frame full table in photo.`)
+          return
+        }
+        if (!mapping['d1'] && playerMapped < 3) {
+          setError('Need dealer up-card + your 5 cards in one photo.')
+          return
+        }
+      }
+      if (context === 'dealer-rest' && dealerHoleMapped < 3) {
+        setError(`Only ${dealerHoleMapped}/4 dealer cards — snap all revealed hole cards.`)
+        return
+      }
       if (context === 'player-hand' && playerMapped < 3) {
         setError(`Only mapped ${playerMapped}/5 player cards — include full hand in photo.`)
         return
       }
-      if (context === 'table' && !hasDealerUp && !mapping['d1'] && playerMapped < 3) {
-        setError(`Found dealer only — include your 5 player cards in the photo.`)
-        return
-      }
       onCardsDetected(mapping)
-      setSuccess(`✓ ${n} card${n === 1 ? '' : 's'} loaded${playerMapped > 0 ? ` (${playerMapped} player)` : ''}`)
+      setSuccess(
+        `✓ ${n} card${n === 1 ? '' : 's'} loaded`
+        + (playerMapped > 0 ? ` (${playerMapped} player)` : '')
+        + (dealerHoleMapped > 0 ? ` (${dealerHoleMapped} dealer)` : '')
+      )
       setTimeout(() => setSuccess(null), 3000)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Photo read failed')

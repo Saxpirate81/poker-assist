@@ -276,13 +276,13 @@ export function CaribbeanHandView({
     : []
 
   const stepHint =
-    step === 'dealer-up' ? 'Tap dealer up-card or photo'
-      : step === 'player' ? `${playerCards.length}/5 cards · tap or photo`
+    step === 'dealer-up' ? 'Snap all 6 cards (dealer + yours) or tap'
+      : step === 'player' ? `${playerCards.length}/5 · snap all 6 or tap cards`
         : step === 'bet' ? (shouldRaise ? (raiseReason || 'Strategy says raise') : `Fold saves ${formatMoneyWithSymbol(raiseAmt)}`)
           : step === 'showdown'
             ? (betAction === 'fold'
-              ? `Folded · dealer ${dealerRest.length}/4`
-              : `Dealer ${dealerRest.length}/4 · ${showdownPreview?.valid ? showdownPreview.summary : 'log all cards'}`)
+              ? `Snap dealer final 4 (${dealerRest.length}/4) or tap`
+              : `Snap dealer final 4 (${dealerRest.length}/4) · ${showdownPreview?.valid ? 'scoring…' : 'tap or photo'}`)
             : (resultText ?? 'Hand complete')
 
   const bannerText = validationError ?? tableDup ?? stepHint
@@ -290,13 +290,9 @@ export function CaribbeanHandView({
   const showPhoto = step === 'dealer-up' || step === 'player' || step === 'bet' || step === 'showdown'
 
   const photoConfig =
-    step === 'dealer-up'
-      ? { context: 'dealer-up' as const, expected: 1, slots: ['d1'], label: 'Photo: dealer up' }
-      : step === 'showdown'
-        ? { context: 'dealer-rest' as const, expected: 4, slots: dealerRestIds, label: 'Photo: dealer 2–5' }
-        : dealerUp
-          ? { context: 'player-hand' as const, expected: 5, slots: playerIds, label: 'Photo: your 5 cards' }
-          : { context: 'table' as const, expected: 6, slots: tableSlotIds, label: 'Photo: dealer + your 5' }
+    step === 'showdown'
+      ? { context: 'dealer-rest' as const, expected: 4, slots: dealerRestIds, label: 'Photo: dealer final 4' }
+      : { context: 'table' as const, expected: 6, slots: tableSlotIds, label: 'Photo: snap all 6 cards' }
 
   return (
     <>
@@ -400,8 +396,8 @@ export function CaribbeanHandView({
               />
             )}
 
-            {step === 'dealer-up' && !dealerUp && (
-              <p className="text-center text-xs text-gold py-1">👆 Tap dealer up-card above</p>
+            {step === 'dealer-up' && !dealerUp && playerCards.length === 0 && (
+              <p className="text-center text-[10px] text-gold py-0.5">📸 One photo fills dealer + your 5 cards</p>
             )}
 
             {step === 'bet' && (
