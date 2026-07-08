@@ -12,6 +12,7 @@ interface PhotoCaptureProps {
   onCardsDetected: (mapping: Record<string, Card>) => void
   label?: string
   compact?: boolean
+  prominent?: boolean
   context?: PhotoReadContext
   existingCards?: Record<string, Card | null>
 }
@@ -22,6 +23,7 @@ export function PhotoCapture({
   onCardsDetected,
   label,
   compact,
+  prominent,
   context = 'player-hand',
   existingCards = {},
 }: PhotoCaptureProps) {
@@ -88,7 +90,47 @@ export function PhotoCapture({
     }
   }
 
-  const buttonLabel = loading ? '📸 Reading…' : `📸 ${label ?? 'Photo AI read'}`
+  const buttonLabel = loading
+    ? '📸 Reading…'
+    : prominent
+      ? (label ?? 'Snap cards with photo')
+      : `📸 ${label ?? 'Photo AI read'}`
+
+  const fileInput = (
+    <input
+      ref={inputRef}
+      type="file"
+      accept="image/*"
+      capture="environment"
+      className="hidden"
+      onChange={e => {
+        const file = e.target.files?.[0]
+        if (file) processImage(file)
+        e.target.value = ''
+      }}
+    />
+  )
+
+  if (prominent) {
+    return (
+      <div className="mt-1.5">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={loading || !hasAi}
+          className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-gold/35 to-amber-500/25 hover:from-gold/45 hover:to-amber-500/35 text-gold font-bold text-sm transition-all disabled:opacity-40 border-2 border-gold/60 shadow-lg shadow-gold/10 active:scale-[0.98]"
+        >
+          {buttonLabel}
+        </button>
+        {!hasAi && (
+          <p className="mt-1 text-center text-[11px] text-amber-400">Add Gemini key in ⚙️ Settings for photo read</p>
+        )}
+        {fileInput}
+        {error && <p className="mt-1 text-xs text-red-400 text-center">{error}</p>}
+        {success && <p className="mt-1 text-xs text-emerald-400 font-medium text-center">{success}</p>}
+      </div>
+    )
+  }
 
   if (compact) {
     return (
@@ -105,18 +147,7 @@ export function PhotoCapture({
           {!hasAi && (
             <span className="text-[10px] text-amber-400 shrink-0">⚙️ key</span>
           )}
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={e => {
-              const file = e.target.files?.[0]
-              if (file) processImage(file)
-              e.target.value = ''
-            }}
-          />
+          {fileInput}
         </div>
         {error && <p className="mt-0.5 text-[10px] text-red-400 truncate">{error}</p>}
         {success && <p className="mt-0.5 text-[10px] text-emerald-400 font-medium truncate">{success}</p>}
@@ -141,18 +172,7 @@ export function PhotoCapture({
         >
           {loading ? 'Reading…' : 'Take Photo'}
         </button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="hidden"
-          onChange={e => {
-            const file = e.target.files?.[0]
-            if (file) processImage(file)
-            e.target.value = ''
-          }}
-        />
+        {fileInput}
       </div>
       {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
       {success && <p className="mt-2 text-xs text-emerald-400 font-medium">{success}</p>}

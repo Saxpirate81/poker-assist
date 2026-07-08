@@ -301,20 +301,31 @@ export function CaribbeanHandView({
           {/* Header */}
           <header className="shrink-0 pt-1 pb-0.5">
             <div className="flex items-center justify-between gap-2">
-              <button type="button" onClick={onBack} className="text-xs text-white/50 hover:text-white shrink-0">← Exit</button>
-              <span className="text-xs font-bold truncate">🏝️ Caribbean Stud</span>
+              <button type="button" onClick={onBack} className="text-sm text-white/50 hover:text-white shrink-0">← Exit</button>
+              <span className="text-sm font-bold truncate">🏝️ Caribbean Stud</span>
               <div className="flex items-center gap-1 shrink-0">
                 {onOpenSettings && (
                   <button type="button" onClick={onOpenSettings} className="w-8 h-8 rounded-full bg-white/10 text-sm" aria-label="Settings">⚙️</button>
                 )}
-                <button type="button" onClick={handleNextHand} className="text-xs text-gold font-semibold">New →</button>
+                <button type="button" onClick={handleNextHand} className="text-sm text-gold font-semibold">New →</button>
               </div>
             </div>
             <CaribbeanSessionBar session={session} compact />
-            <div className={`py-1 px-2 rounded-lg text-center border ${bannerAlert ? 'bg-red-950/70 border-red-500/40' : 'bg-gold/15 border-gold/40'}`}>
-              <p className="text-gold font-bold text-[11px] leading-tight">{STEP_LABELS[step]}</p>
-              <p className={`text-[10px] leading-tight truncate mt-0.5 ${bannerAlert ? 'text-red-300' : 'text-white/55'}`}>{bannerText}</p>
+            <div className={`py-1.5 px-2.5 rounded-lg text-center border ${bannerAlert ? 'bg-red-950/70 border-red-500/40' : 'bg-gold/15 border-gold/40'}`}>
+              <p className="text-gold font-bold text-sm leading-tight">{STEP_LABELS[step]}</p>
+              <p className={`text-xs leading-tight truncate mt-0.5 ${bannerAlert ? 'text-red-300' : 'text-white/60'}`}>{bannerText}</p>
             </div>
+            {showPhoto && (
+              <PhotoCapture
+                prominent
+                expectedCount={photoConfig.expected}
+                slotIds={photoConfig.slots}
+                context={photoConfig.context}
+                existingCards={state.cards}
+                onCardsDetected={handlePhotoCards}
+                label={photoConfig.label}
+              />
+            )}
           </header>
 
           {/* Table — fills remaining space, no scroll */}
@@ -396,10 +407,6 @@ export function CaribbeanHandView({
               />
             )}
 
-            {step === 'dealer-up' && !dealerUp && playerCards.length === 0 && (
-              <p className="text-center text-[10px] text-gold py-0.5">📸 One photo fills dealer + your 5 cards</p>
-            )}
-
             {step === 'bet' && (
               <div className="flex gap-2">
                 <button
@@ -456,18 +463,6 @@ export function CaribbeanHandView({
                   onClearAll={handleClearAllHands}
                 />
               </>
-            )}
-
-            {showPhoto && (
-              <PhotoCapture
-                compact
-                expectedCount={photoConfig.expected}
-                slotIds={photoConfig.slots}
-                context={photoConfig.context}
-                existingCards={state.cards}
-                onCardsDetected={handlePhotoCards}
-                label={photoConfig.label}
-              />
             )}
           </footer>
         </div>
