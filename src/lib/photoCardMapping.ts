@@ -49,6 +49,20 @@ function findSlotWithIdentity(
 
 const HOLE_SLOT_IDS = ['d2', 'd3', 'd4', 'd5']
 
+/** Strip markdown fences / prose so JSON extractors see clean payloads. */
+export function cleanVisionText(text: string): string {
+  const trimmed = text.trim()
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  return (fenced?.[1] ?? trimmed).trim()
+}
+
+function pickArray(obj: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (key in obj) return obj[key]
+  }
+  return undefined
+}
+
 /** Union every dealer card the model returned (object fields + arrays). */
 function collectDealerPool(parsed: ParsedPhotoCards): Card[] {
   const pool: Card[] = []
@@ -162,16 +176,17 @@ function parseCardList(raw: unknown): Card[] {
 
 /** Extract a complete JSON array using bracket matching (avoids truncated/non-greedy bugs). */
 function extractJsonArray(text: string): unknown[] | null {
-  const start = text.indexOf('[')
+  const cleaned = cleanVisionText(text)
+  const start = cleaned.indexOf('[')
   if (start === -1) return null
   let depth = 0
-  for (let i = start; i < text.length; i++) {
-    if (text[i] === '[') depth++
-    else if (text[i] === ']') {
+  for (let i = start; i < cleaned.length; i++) {
+    if (cleaned[i] === '[') depth++
+    else if (cleaned[i] === ']') {
       depth--
       if (depth === 0) {
         try {
-          return JSON.parse(text.slice(start, i + 1)) as unknown[]
+          return JSON.parse(cleaned.slice(start, i + 1)) as unknown[]
         } catch {
           return null
         }
@@ -183,17 +198,25 @@ function extractJsonArray(text: string): unknown[] | null {
 
 /** Extract a complete JSON object using brace matching. */
 function extractJsonObject(text: string): Record<string, unknown> | null {
-  const start = text.indexOf('{')
+  const cleaned = cleanVisionText(text)
+  const start = cleaned.indexOf('{')
   if (start === -1) return null
   let depth = 0
-  for (let i = start; i < text.length; i++) {
-    if (text[i] === '{') depth++
-    else if (text[i] === '}') {
+  for (let i = start; i < cleaned.length; i++) {
+    if (cleaned[i] === '{') depth++
+    else if (cleaned[i] === '}') {
       depth--
       if (depth === 0) {
         try {
-          return JSON.parse(text.slice(start, i + 1)) as Record<string, unknown>
+          return JSON.parse(cleaned.slice(start, i + 1)) as Record<string, unknown>
         } catch {
+          // Fallback: slice from first { to last } (handles minor trailing junk)
+          try {
+            const end = cleaned.lastIndexOf('}')
+            if (end > start) {
+              return JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>
+            }
+          } catch { /* ignore */ }
           return null
         }
       }
@@ -205,12 +228,23 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
 export function parseVisionResponse(text: string, context: PhotoReadContext): ParsedPhotoCards {
   if (context === 'table') {
     const obj = extractJsonObject(text)
-    if (obj && ('dealerUp' in obj || 'playerCards' in obj)) {
-      const dealerRaw = obj.dealerUp
-      const dealerUp = dealerRaw && typeof dealerRaw === 'object' && dealerRaw !== null
+    if (obj && ('dealerUp' in obj || 'playerCards' in obj || 'dealer_up' in obj || 'player_cards' in obj || 'cards' in obj)) {
+      const dealerRaw = pickArray(obj, 'dealerUp', 'dealer_up', 'dealer')
+      const dealerUp = dealerRaw && typeof dealerRaw === 'object' && dealerRaw !== null && !Array.isArray(dealerRaw)
         ? normalizeCardFromAi(dealerRaw as { rank?: string; suit?: string })
         : null
-      const playerCards = stripTableDuplicates(dealerUp, parseCardList(obj.playerCards))
+      const playerRaw = pickArray(obj, 'playerCards', 'player_cards', 'player', 'players')
+      let playerCards = stripTableDuplicates(dealerUp, parseCardList(playerRaw))
+      if (playerCards.length === 0 && Array.isArray(obj.cards)) {
+        const all = parseCardList(obj.cards)
+        if (all.length >= 6) {
+          const up = all[0] ?? null
+          playerCards = stripTableDuplicates(up, all.slice(1, 6))
+          if (!dealerUp && up) {
+            return { dealerUp: up, playerCards, dealerHoleCards: [], flat: [...(up ? [up] : []), ...playerCards] }
+          }
+        }
+      }
       const flat = [...(dealerUp ? [dealerUp] : []), ...playerCards]
       return { dealerUp, playerCards, dealerHoleCards: [], flat }
     }
@@ -237,16 +271,16 @@ export function parseVisionResponse(text: string, context: PhotoReadContext): Pa
     let dealerUp: Card | null = null
     let dealerHoleCards: Card[] = []
 
-    if (obj && ('dealerUp' in obj || 'dealerHoleCards' in obj || 'dealerCards' in obj)) {
-      const dealerRaw = obj.dealerUp
-      dealerUp = dealerRaw && typeof dealerRaw === 'object' && dealerRaw !== null
+    if (obj && ('dealerUp' in obj || 'dealerHoleCards' in obj || 'dealerCards' in obj || 'dealer_hole_cards' in obj || 'dealer_cards' in obj)) {
+      const dealerRaw = pickArray(obj, 'dealerUp', 'dealer_up', 'dealer')
+      dealerUp = dealerRaw && typeof dealerRaw === 'object' && dealerRaw !== null && !Array.isArray(dealerRaw)
         ? normalizeCardFromAi(dealerRaw as { rank?: string; suit?: string })
         : null
-      if ('dealerHoleCards' in obj) {
-        dealerHoleCards = parseCardList(obj.dealerHoleCards)
+      if ('dealerHoleCards' in obj || 'dealer_hole_cards' in obj) {
+        dealerHoleCards = parseCardList(pickArray(obj, 'dealerHoleCards', 'dealer_hole_cards'))
       }
-      if ('dealerCards' in obj) {
-        const all = dedupeCards(parseCardList(obj.dealerCards))
+      if ('dealerCards' in obj || 'dealer_cards' in obj) {
+        const all = dedupeCards(parseCardList(pickArray(obj, 'dealerCards', 'dealer_cards')))
         if (!dealerUp) dealerUp = all[0] ?? null
         dealerHoleCards = [...dealerHoleCards, ...all.slice(dealerUp ? 1 : 0)]
       }
@@ -335,8 +369,8 @@ export function mapDetectedCardsToSlots(
 
 export function minCardsForContext(context: PhotoReadContext, expectedCount: number, hasDealer: boolean): number {
   if (context === 'table') {
-    // One table photo: prefer full 6; accept 5 player-only if dealer already logged
-    if (hasDealer) return 5
+    // Dealer already logged — only need player row (accept partial for re-snaps)
+    if (hasDealer) return 3
     return 6
   }
   if (context === 'player-hand') return Math.min(3, expectedCount)

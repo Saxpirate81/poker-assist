@@ -96,7 +96,7 @@ async function tryGeminiModels(
     if (result.error && result.cards.length === 0) {
       lastError = result.error
       if (result.error?.includes('API key') || result.error?.includes('403')) break
-      if (shouldTryNextModel(result.status, result.error)) continue
+      if (shouldRetryAfterVisionFailure(result.status, result.error)) continue
       break
     }
 
@@ -117,6 +117,7 @@ async function tryGeminiModels(
 
     if (result.error) lastError = result.error
     if (result.error?.includes('API key') || result.error?.includes('403')) break
+    if (shouldRetryAfterVisionFailure(result.status, result.error)) continue
     if (!shouldTryNextModel(result.status, result.error)) break
   }
 
@@ -146,6 +147,13 @@ function shouldTryNextModel(status: number, error?: string): boolean {
   if (!error) return false
   const lower = error.toLowerCase()
   return lower.includes('no longer available') || lower.includes('not found') || lower.includes('model unavailable')
+}
+
+/** Try fallback models when a model responds but JSON/card parse fails. */
+function shouldRetryAfterVisionFailure(status: number, error?: string): boolean {
+  if (status === 200 && error?.toLowerCase().includes('could not read')) return true
+  if (status === 200 && error?.toLowerCase().includes('empty response')) return true
+  return shouldTryNextModel(status, error)
 }
 
 async function callGeminiGenerate(
@@ -184,11 +192,23 @@ async function callGeminiVision(
         { inline_data: { mime_type: mime, data: base64Data } },
       ],
     }],
-    generationConfig: { temperature: 0.1, maxOutputTokens: context === 'table' ? 1200 : 1000 },
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: context === 'table' ? 1200 : 1000,
+    },
   })
 
   if (!result.ok) {
     return { cards: [], parsed: { dealerUp: null, playerCards: [], dealerHoleCards: [], flat: [] }, error: result.error, status: result.status }
+  }
+
+  if (!result.text.trim()) {
+    return {
+      cards: [],
+      parsed: { dealerUp: null, playerCards: [], dealerHoleCards: [], flat: [] },
+      error: 'Empty response from Gemini — try again with a clearer photo.',
+      status: 200,
+    }
   }
 
   const parsed = parseVisionResponse(result.text, context)
@@ -263,7 +283,7 @@ export async function recognizeCardsFromPhotoGemini(
     if (result.error && result.cards.length === 0) {
       lastError = result.error
       if (result.error?.includes('API key') || result.error?.includes('403')) break
-      if (shouldTryNextModel(result.status, result.error)) continue
+      if (shouldRetryAfterVisionFailure(result.status, result.error)) continue
       break
     }
 
@@ -283,23 +303,36 @@ export async function recognizeCardsFromPhotoGemini(
       if (!best || total > best.cards.length || playerCount > best.parsed.playerCards.length) {
         best = { cards: result.cards, parsed: result.parsed }
       }
+    } else if (context === 'table' && options?.hasDealerUp && playerCount >= 3) {
+      if (!best || playerCount > best.parsed.playerCards.length) {
+        best = { cards: result.cards, parsed: result.parsed }
+      }
     }
 
     if (result.error) lastError = result.error
     if (result.error?.includes('API key') || result.error?.includes('403')) break
+    if (shouldRetryAfterVisionFailure(result.status, result.error)) continue
+    if (total > 0) continue
     if (!shouldTryNextModel(result.status, result.error)) break
   }
 
   if (best && best.cards.length >= minRequired) {
     return { cards: best.cards, parsed: best.parsed }
   }
+  if (best && context === 'table' && options?.hasDealerUp && best.parsed.playerCards.length >= 3) {
+    return { cards: best.cards, parsed: best.parsed }
+  }
 
   return {
     cards: [],
     parsed: { dealerUp: null, playerCards: [], dealerHoleCards: [], flat: [] },
-    error: lastError.includes('Could not read')
+    error: lastError.includes('Could not read') || lastError.includes('Empty response')
       ? lastError
-      : `Only found ${best?.cards.length ?? 0} card(s). Frame the full table and retry.`,
+      : best && best.cards.length > 0
+        ? `Only found ${best.cards.length} card(s). Frame the full table and retry.`
+        : lastError !== 'Gemini vision failed'
+          ? lastError
+          : `Only found 0 card(s). Frame the full table and retry.`,
   }
 }
 

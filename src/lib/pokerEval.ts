@@ -65,6 +65,14 @@ export function normalizeCardFromAi(raw: { rank?: string; suit?: string }): Card
 
   let rank = String(raw.rank).trim().toUpperCase()
   if (rank === '10') rank = 'T'
+  const rankNames: Record<string, Rank> = {
+    ACE: 'A', A: 'A',
+    KING: 'K', K: 'K',
+    QUEEN: 'Q', Q: 'Q',
+    JACK: 'J', J: 'J',
+    TEN: 'T', T: 'T',
+  }
+  rank = rankNames[rank] ?? rank
   if (!RANKS.includes(rank as Rank)) return null
 
   const suitKey = String(raw.suit).trim().toLowerCase()
