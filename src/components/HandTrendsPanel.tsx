@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { HandTrends, LoggedCaribbeanHand } from '../types/handLog'
-import { formatHandLine } from '../lib/handLogService'
+import { formatHandLine, formatHandTimestamp } from '../lib/handLogService'
 import { formatMoneyWithSymbol } from '../lib/money'
 
 interface HandTrendsPanelProps {
@@ -101,23 +101,26 @@ export function HandTrendsPanel({
                 <span className="text-amber-400/80">AI ≠ {trends.ignoreAiPnL >= 0 ? '+' : ''}{formatMoneyWithSymbol(trends.ignoreAiPnL)}</span>
               </div>
 
-              <div className="space-y-1 max-h-36 overflow-y-auto">
+              <div className="space-y-1.5 max-h-44 overflow-y-auto">
                 {hands.slice(0, 20).map(h => (
-                  <div key={h.id} className="flex items-center gap-1 text-xs text-white/60 border-b border-white/5 pb-1">
-                    <span className="truncate flex-1">{formatHandLine(h)}</span>
-                    <span className={`shrink-0 ${h.followedAi ? 'text-emerald-500/70' : 'text-amber-500/70'}`}>
-                      {h.followedAi ? '✓AI' : '≠AI'}
-                    </span>
-                    {onDeleteHand && (
-                      <button
-                        type="button"
-                        onClick={() => onDeleteHand(h.id)}
-                        className="shrink-0 w-6 h-6 rounded text-red-400/70 hover:text-red-400 hover:bg-red-500/10"
-                        aria-label="Delete hand"
-                      >
-                        ×
-                      </button>
-                    )}
+                  <div key={h.id} className="border-b border-white/5 pb-1.5">
+                    <p className="text-[9px] text-white/35 leading-tight">{formatHandTimestamp(h.createdAt)}</p>
+                    <div className="flex items-center gap-1 text-xs text-white/60">
+                      <span className="truncate flex-1">{formatHandLine(h)}</span>
+                      <span className={`shrink-0 ${h.followedAi ? 'text-emerald-500/70' : 'text-amber-500/70'}`}>
+                        {h.followedAi ? '✓AI' : '≠AI'}
+                      </span>
+                      {onDeleteHand && (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteHand(h.id)}
+                          className="shrink-0 w-6 h-6 rounded text-red-400/70 hover:text-red-400 hover:bg-red-500/10"
+                          aria-label="Delete hand"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

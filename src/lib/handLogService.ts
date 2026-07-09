@@ -236,6 +236,22 @@ export function computeTrends(hands: LoggedCaribbeanHand[]): HandTrends {
   }
 }
 
+export function formatHandTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return ''
+    return d.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+  } catch {
+    return ''
+  }
+}
+
 export function formatHandLine(h: LoggedCaribbeanHand): string {
   const cards = formatCardsShort(h.playerCards)
   const pnl = h.netResult >= 0 ? `+${h.netResult}` : String(h.netResult)
