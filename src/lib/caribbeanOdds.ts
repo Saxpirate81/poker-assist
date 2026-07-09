@@ -1,7 +1,7 @@
 import type { Card } from '../types/poker'
 import type { EvaluatedHand } from './pokerEval'
 import { evaluateHand } from './pokerEval'
-import { shouldCaribbeanRaise } from './caribbeanFlow'
+import { shouldCaribbeanRaise, getRaiseReason } from './caribbeanFlow'
 
 export interface CaribbeanBetAnalysis {
   winPct: number
@@ -74,9 +74,11 @@ export function analyzeCaribbeanBet(
     : Math.min(0.88, 0.72 + Math.abs(evDiff) / (ante + raiseAmt + 1))
 
   let reason = ''
-  if (hand.score >= 200) reason = `${hand.label} — standard raise`
-  else if (raise) reason = 'Ace-high / matches dealer up-card'
-  else reason = 'Below raise threshold — save raise'
+  if (raise) {
+    reason = getRaiseReason(playerCards, hand, dealerUp) || `${hand.label} — raise`
+  } else {
+    reason = `${hand.label} — below raise threshold (need pair, or Ace w/ J+ kicker)`
+  }
 
   return {
     winPct,

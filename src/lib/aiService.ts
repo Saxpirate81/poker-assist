@@ -116,7 +116,7 @@ function caribbeanAdvice(
       recommendedAction: `Raise ${formatMoneyWithSymbol(raiseAmt)}`,
       betAmount: raiseAmt,
       urgent: true,
-      confidence: hand!.score >= 200 ? 0.95 : 0.84,
+      confidence: hand && hand.rank !== 'high_card' ? 0.95 : 0.84,
     }
   }
 
@@ -386,7 +386,17 @@ export async function getAiAdvice(
       const gemini = await getGeminiAdvice(prompt)
       if (gemini) {
         const confidence = Math.min(0.92, Math.max(0.5, gemini.confidence ?? 0.8))
-        return { ...baseline, ...gemini, confidence, provider: 'gemini' }
+        const rulesRaise = shouldCaribbeanRaise(playerCards, dealerUp)
+        const geminiRaise = !!(gemini.betAmount && gemini.betAmount > 0)
+        if (rulesRaise !== geminiRaise) {
+          return {
+            ...baseline,
+            detail: `${baseline.detail} (AI suggested ${geminiRaise ? 'raise' : 'fold'} — using table rules)`,
+            confidence,
+            provider: 'gemini',
+          }
+        }
+        return { ...baseline, headline: gemini.headline ?? baseline.headline, detail: gemini.detail ?? baseline.detail, confidence, provider: 'gemini' }
       }
     }
   }
@@ -424,7 +434,23 @@ Respond ONLY with JSON: {"verdict":"good|bad|neutral|warning","headline":"short"
           if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]) as AiAdvice
             const confidence = Math.min(0.92, Math.max(0.5, parsed.confidence ?? 0.8))
-            return { ...baseline, ...parsed, confidence, provider: 'openai' }
+            const rulesRaise = shouldCaribbeanRaise(playerCards, dealerUp)
+            const aiRaise = !!(parsed.betAmount && parsed.betAmount > 0)
+            if (rulesRaise !== aiRaise) {
+              return {
+                ...baseline,
+                detail: `${baseline.detail} (AI suggested ${aiRaise ? 'raise' : 'fold'} — using table rules)`,
+                confidence,
+                provider: 'openai',
+              }
+            }
+            return {
+              ...baseline,
+              headline: parsed.headline ?? baseline.headline,
+              detail: parsed.detail ?? baseline.detail,
+              confidence,
+              provider: 'openai',
+            }
           }
         }
       } catch { /* fall through */ }

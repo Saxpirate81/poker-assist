@@ -30,7 +30,7 @@ export function shouldCaribbeanRaise(
   if (playerCards.length !== 5) return false
   const eval5 = evaluateHand(playerCards)
   if (!eval5) return false
-  if (eval5.score >= 200) return true
+  if (eval5.score >= 100) return true
 
   const pValues = playerCards.map(c => rankValue(c.rank))
   const pRanks = new Set(playerCards.map(c => c.rank))
@@ -45,7 +45,6 @@ export function shouldCaribbeanRaise(
 
   if (pRanks.has(upRank)) {
     if (pValues.includes(14)) return true
-    if (eval5.score >= 100) return true
   }
 
   if (pValues.includes(14)) {
@@ -70,7 +69,7 @@ export function getRaiseReason(
   dealerUpCard?: Card | null
 ): string {
   if (!hand) return ''
-  if (hand.score >= 200) return `${hand.label} — always raise`
+  if (hand.rank !== 'high_card') return `${hand.label} — always raise`
   if (dealerUpCard && playerCards.some(c => c.rank === dealerUpCard.rank)) {
     return `You match dealer ${dealerUpCard.rank} — raise`
   }
@@ -78,4 +77,9 @@ export function getRaiseReason(
     return 'Ace-high with J+ kicker — raise'
   }
   return ''
+}
+
+/** True when the evaluated 5-card hand is a real pair or better (not high-card). */
+export function isPairOrBetter(hand: EvaluatedHand | null): boolean {
+  return !!hand && hand.rank !== 'high_card'
 }

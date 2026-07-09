@@ -14,6 +14,20 @@ interface CaribbeanAnalysisBarProps {
   dense?: boolean
 }
 
+function aiSaysFold(advice: AiAdvice | null): boolean {
+  if (!advice) return false
+  if (advice.betAmount !== undefined && advice.betAmount > 0) return false
+  if (advice.verdict === 'bad') return true
+  if (/fold/i.test(advice.recommendedAction ?? '')) return true
+  if (/fold/i.test(advice.headline ?? '')) return true
+  return false
+}
+
+function aiSaysRaise(advice: AiAdvice | null): boolean {
+  if (!advice) return false
+  return !!(advice.betAmount && advice.betAmount > 0)
+}
+
 /** Coach certainty — not the same as win probability. */
 function coachConfidencePct(aiAdvice: AiAdvice | null, analysis: CaribbeanBetAnalysis): number {
   const raw = aiAdvice?.confidence ?? analysis.confidence
@@ -44,10 +58,18 @@ export function CaribbeanAnalysisBar({
 
   if (!analysis) return null
 
-  const recommend = aiAdvice?.betAmount && aiAdvice.betAmount > 0 ? 'raise' : aiAdvice?.verdict === 'bad' ? 'fold' : analysis.recommend
-  const isRaise = recommend === 'raise'
-  const headline = aiAdvice?.headline ?? (isRaise ? `Raise ${formatMoneyWithSymbol(raiseAmt)}` : 'Fold')
-  const detail = aiAdvice?.detail ?? analysis.reason
+  // Rules engine (analysis.recommend) drives green/red — avoids AI saying fold then flipping green.
+  const isRaise = analysis.recommend === 'raise'
+  const rulesHeadline = isRaise
+    ? `Raise ${formatMoneyWithSymbol(raiseAmt)}`
+    : 'FOLD — save your raise'
+  const rulesDetail = analysis.reason
+
+  const aiAligned = isRaise ? aiSaysRaise(aiAdvice) : aiSaysFold(aiAdvice)
+  const headline = loading
+    ? 'Analyzing…'
+    : (aiAligned && aiAdvice?.headline ? aiAdvice.headline : rulesHeadline)
+  const detail = aiAligned && aiAdvice?.detail ? aiAdvice.detail : rulesDetail
   const coachPct = coachConfidencePct(aiAdvice, analysis)
 
   return (
@@ -56,7 +78,7 @@ export function CaribbeanAnalysisBar({
         <div className="flex items-center gap-1.5 min-w-0">
           <span className={`shrink-0 ${dense ? 'text-base' : 'text-lg'}`}>{isRaise ? '✅' : '⛔'}</span>
           <div className="min-w-0">
-            <p className={`font-bold truncate ${dense ? 'text-xs' : 'text-sm'}`}>{loading ? 'Analyzing…' : headline}</p>
+            <p className={`font-bold truncate ${dense ? 'text-xs' : 'text-sm'}`}>{headline}</p>
             {!dense && <p className="text-[10px] text-white/50 truncate">{detail}</p>}
           </div>
         </div>
