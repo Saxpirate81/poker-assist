@@ -137,7 +137,7 @@ export function PhotoCapture({
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={loading || !hasAi}
-          className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-gold/35 to-amber-500/25 hover:from-gold/45 hover:to-amber-500/35 text-gold font-bold text-sm transition-all disabled:opacity-40 border-2 border-gold/60 shadow-lg shadow-gold/10 active:scale-[0.98]"
+          className="w-full py-3 rounded-xl bg-gold text-slate-900 font-bold text-base hover:bg-gold-dark transition-colors disabled:opacity-40 active:scale-[0.98]"
         >
           {buttonLabel}
         </button>

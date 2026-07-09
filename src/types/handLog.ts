@@ -34,4 +34,13 @@ export interface HandTrends {
   avgAnte: number
   winRate: number
   recentStreak: string
+  /** e.g. "3W", "2L", "1F" */
+  currentStreak: string
+  dealerQualifyRate: number
+  todayHands: number
+  todayPnL: number
+  /** Last 10 hands, oldest first (for sparkline) */
+  recentPnL: number[]
+  followAiPnL: number
+  ignoreAiPnL: number
 }

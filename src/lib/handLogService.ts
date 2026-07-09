@@ -164,10 +164,22 @@ export function rebuildSessionFromHands(hands: LoggedCaribbeanHand[]): Caribbean
   }
 }
 
+const EMPTY_TRENDS: HandTrends = {
+  totalHands: 0, wins: 0, losses: 0, folds: 0, raises: 0, totalPnL: 0,
+  aiFollowRate: 0, avgAnte: 0, winRate: 0, recentStreak: '—', currentStreak: '—',
+  dealerQualifyRate: 0, todayHands: 0, todayPnL: 0, recentPnL: [],
+  followAiPnL: 0, ignoreAiPnL: 0,
+}
+
+function streakCode(h: LoggedCaribbeanHand): string {
+  if (h.action === 'fold') return 'F'
+  if (h.playerWon) return 'W'
+  if (h.outcomeSummary.toLowerCase().includes('push')) return 'P'
+  return 'L'
+}
+
 export function computeTrends(hands: LoggedCaribbeanHand[]): HandTrends {
-  if (hands.length === 0) {
-    return { totalHands: 0, wins: 0, losses: 0, folds: 0, raises: 0, totalPnL: 0, aiFollowRate: 0, avgAnte: 0, winRate: 0, recentStreak: '—' }
-  }
+  if (hands.length === 0) return { ...EMPTY_TRENDS }
 
   const wins = hands.filter(h => h.playerWon).length
   const folds = hands.filter(h => h.action === 'fold').length
@@ -177,13 +189,29 @@ export function computeTrends(hands: LoggedCaribbeanHand[]): HandTrends {
   const played = hands.filter(h => h.action === 'raise')
   const winRate = played.length ? (wins / played.length) * 100 : 0
 
-  let streak = ''
+  let recentStreak = ''
   for (const h of hands.slice(0, 10)) {
-    if (h.action === 'fold') streak += 'F'
-    else if (h.playerWon) streak += 'W'
-    else if (h.outcomeSummary.toLowerCase().includes('push')) streak += 'P'
-    else streak += 'L'
+    recentStreak += streakCode(h)
   }
+
+  let currentStreak = '—'
+  if (hands.length > 0) {
+    const first = streakCode(hands[0]!)
+    let count = 1
+    for (let i = 1; i < hands.length; i++) {
+      if (streakCode(hands[i]!) !== first) break
+      count++
+    }
+    currentStreak = `${count}${first}`
+  }
+
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+  const todayHandsList = hands.filter(h => new Date(h.createdAt) >= todayStart)
+  const showdownHands = hands.filter(h => h.action === 'raise' && h.dealerCards.length >= 5)
+  const dealerQualifyRate = showdownHands.length
+    ? (showdownHands.filter(h => h.dealerQualified).length / showdownHands.length) * 100
+    : 0
 
   return {
     totalHands: hands.length,
@@ -197,7 +225,14 @@ export function computeTrends(hands: LoggedCaribbeanHand[]): HandTrends {
     aiFollowRate: hands.length ? (followed / hands.length) * 100 : 0,
     avgAnte: hands.reduce((s, h) => s + h.ante, 0) / hands.length,
     winRate,
-    recentStreak: streak || '—',
+    recentStreak: recentStreak || '—',
+    currentStreak,
+    dealerQualifyRate,
+    todayHands: todayHandsList.length,
+    todayPnL: todayHandsList.reduce((s, h) => s + h.netResult, 0),
+    recentPnL: hands.slice(0, 10).reverse().map(h => h.netResult),
+    followAiPnL: hands.filter(h => h.followedAi).reduce((s, h) => s + h.netResult, 0),
+    ignoreAiPnL: hands.filter(h => !h.followedAi).reduce((s, h) => s + h.netResult, 0),
   }
 }
 

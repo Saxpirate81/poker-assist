@@ -1,4 +1,5 @@
 import type { PokerGame } from '../types/poker'
+import { HomeStatsCard } from './HomeStatsCard'
 import { POKER_GAMES } from '../data/games'
 
 interface GameSelectProps {
@@ -33,6 +34,8 @@ export function GameSelect({ onSelect, onQuickStartCaribbean }: GameSelectProps)
           <span className="text-gold text-2xl">→</span>
         </div>
       </button>
+
+      <HomeStatsCard />
 
       <p className="text-xs text-white/40 uppercase tracking-wider mb-3">Other games</p>
       <div className="grid gap-3">

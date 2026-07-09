@@ -77,6 +77,7 @@ export function CaribbeanHandView({
   const [aiLoading, setAiLoading] = useState(false)
   const [photoRefresh, setPhotoRefresh] = useState(0)
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [showStats, setShowStats] = useState(false)
   const scoredRef = useRef(false)
   const aiFetchedForHand = useRef(false)
 
@@ -118,6 +119,9 @@ export function CaribbeanHandView({
 
   useEffect(() => { saveCaribbeanSession(session) }, [session])
   useEffect(() => { fetchCaribbeanHands().then(setLoggedHands) }, [])
+  useEffect(() => {
+    if (step === 'done') setShowStats(true)
+  }, [step])
 
   const aiState: HandState = {
     ...state,
@@ -309,6 +313,13 @@ export function CaribbeanHandView({
               <button type="button" onClick={onBack} className="text-sm text-white/50 hover:text-white shrink-0">← Exit</button>
               <span className="text-sm font-bold truncate">🏝️ Caribbean Stud</span>
               <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowStats(s => !s)}
+                  className={`px-2 py-1 rounded-lg text-xs font-semibold ${showStats ? 'bg-gold/20 text-gold' : 'text-white/50 hover:text-white/80'}`}
+                >
+                  Stats
+                </button>
                 {onOpenSettings && (
                   <button type="button" onClick={onOpenSettings} className="w-8 h-8 rounded-full bg-white/10 text-sm" aria-label="Settings">⚙️</button>
                 )}
@@ -316,6 +327,16 @@ export function CaribbeanHandView({
               </div>
             </div>
             <CaribbeanSessionBar session={session} compact />
+            {showStats && (
+              <HandTrendsPanel
+                hands={loggedHands}
+                trends={trends}
+                cloudSync={isSupabaseConfigured()}
+                defaultCollapsed={step !== 'done'}
+                onDeleteHand={handleDeleteHand}
+                onClearAll={handleClearAllHands}
+              />
+            )}
             <div className={`py-1.5 px-2.5 rounded-lg text-center border ${bannerAlert ? 'bg-red-950/70 border-red-500/40' : 'bg-gold/15 border-gold/40'}`}>
               <p className="text-gold font-bold text-sm leading-tight">{STEP_LABELS[step]}</p>
               <p className={`text-xs leading-tight truncate mt-0.5 ${bannerAlert ? 'text-red-300' : 'text-white/60'}`}>{bannerText}</p>
@@ -459,14 +480,6 @@ export function CaribbeanHandView({
                 <button type="button" onClick={handleNextHand} className="w-full py-3 rounded-xl bg-gold text-slate-900 font-bold text-base">
                   Next Hand →
                 </button>
-                <HandTrendsPanel
-                  hands={loggedHands}
-                  trends={trends}
-                  cloudSync={isSupabaseConfigured()}
-                  defaultCollapsed
-                  onDeleteHand={handleDeleteHand}
-                  onClearAll={handleClearAllHands}
-                />
               </>
             )}
           </footer>
