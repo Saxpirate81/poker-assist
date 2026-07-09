@@ -992,7 +992,147 @@ function strengthWinnerLabel(p: HandStrengthPoint): string {
   return 'Dealer not logged'
 }
 
-/** You vs dealer hand strength — paginated blocks of 10 hands. */
+const STRENGTH_FILTER_KEY = 'poker-assist-strength-filter'
+
+const STRENGTH_LEGEND: {
+  stronger: HandStrengthPoint['stronger']
+  label: string
+  color: string
+  short: string
+}[] = [
+  { stronger: 'player', label: 'You stronger', color: '#34d399', short: 'Y' },
+  { stronger: 'dealer', label: 'Dealer stronger', color: '#f87171', short: 'D' },
+  { stronger: 'tie', label: 'Tied', color: '#94a3b8', short: 'T' },
+  { stronger: 'unknown', label: 'No dealer', color: '#64748b', short: '?' },
+]
+
+function useStrengthFilter() {
+  const [hidden, setHidden] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(STRENGTH_FILTER_KEY)
+      if (raw) return new Set(JSON.parse(raw) as string[])
+    } catch { /* ignore */ }
+    return new Set()
+  })
+
+  const toggle = useCallback((id: string) => {
+    setHidden(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      try {
+        localStorage.setItem(STRENGTH_FILTER_KEY, JSON.stringify([...next]))
+      } catch { /* ignore */ }
+      return next
+    })
+  }, [])
+
+  return { hidden, toggle }
+}
+
+function groupStrengthByDate(points: HandStrengthPoint[]): { date: string; hands: HandStrengthPoint[] }[] {
+  const map = new Map<string, HandStrengthPoint[]>()
+  for (const h of points) {
+    const date = new Date(h.createdAt).toLocaleDateString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
+    const list = map.get(date) ?? []
+    list.push(h)
+    map.set(date, list)
+  }
+  return [...map.entries()].map(([date, hands]) => ({ date, hands }))
+}
+
+function StrengthDetailPanel({
+  active,
+  onClose,
+}: {
+  active: HandStrengthPoint
+  onClose: () => void
+}) {
+  return (
+    <div className="mt-2 rounded-lg bg-slate-800/95 border border-gold/25 px-3 py-2 relative">
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute top-1.5 right-2 text-white/30 hover:text-white text-sm"
+        aria-label="Close"
+      >
+        ×
+      </button>
+      <p className="text-[10px] text-white/45 pr-6">
+        Hand {active.handNum} · {formatHandTimestamp(active.createdAt)}
+      </p>
+      <p className="text-sm font-bold mt-0.5 text-gold">{strengthWinnerLabel(active)}</p>
+      <div className="grid grid-cols-2 gap-2 mt-1 text-[10px]">
+        <div>
+          <p className="text-emerald-400/80">You · {active.playerScore}</p>
+          <p className="text-white/60 truncate">{active.playerLabel}</p>
+        </div>
+        <div>
+          <p className="text-red-400/80">
+            Dealer · {active.dealerScore != null ? active.dealerScore : '—'}
+          </p>
+          <p className="text-white/60 truncate">{active.dealerLabel ?? 'Not logged'}</p>
+        </div>
+      </div>
+      <p className={`text-sm font-bold mt-1 ${active.netResult >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+        {formatPnLShort(active.netResult)} · {active.action}
+      </p>
+    </div>
+  )
+}
+
+function StrengthDualBarHand({
+  h,
+  maxScore,
+  itemPx,
+  isActive,
+  onSelect,
+  showHandNum = true,
+}: {
+  h: HandStrengthPoint
+  maxScore: number
+  itemPx?: number
+  isActive: boolean
+  onSelect: () => void
+  showHandNum?: boolean
+}) {
+  const playerH = (h.playerScore / maxScore) * 100
+  const dealerH = h.dealerScore != null ? (h.dealerScore / maxScore) * 100 : 0
+  const style = itemPx != null ? { width: itemPx, flex: 'none' as const } : undefined
+
+  return (
+    <button
+      type="button"
+      style={style}
+      onClick={onSelect}
+      className={`${itemPx == null ? 'flex-1 min-w-0' : ''} flex flex-col items-center justify-end h-full gap-0.5 p-0 border-0 bg-transparent ${
+        isActive ? 'opacity-100' : 'opacity-90 hover:opacity-100'
+      }`}
+      aria-label={`Hand ${h.handNum}: ${strengthWinnerLabel(h)}`}
+    >
+      <div className="flex items-end justify-center gap-px w-full h-14">
+        <div
+          className={`w-[42%] rounded-t-sm bg-emerald-500/75 ${isActive ? 'ring-1 ring-gold/50' : ''}`}
+          style={{ height: `${Math.max(8, playerH)}%` }}
+        />
+        <div
+          className={`w-[42%] rounded-t-sm ${h.dealerScore != null ? 'bg-red-400/75' : 'bg-white/15 border border-dashed border-white/20'}`}
+          style={{ height: `${Math.max(h.dealerScore != null ? 8 : 12, dealerH)}%` }}
+        />
+      </div>
+      {showHandNum && itemPx != null && itemPx >= 14 && (
+        <span className="text-[7px] text-white/45 leading-none">{h.handNum}</span>
+      )}
+    </button>
+  )
+}
+
+/** You vs dealer hand strength — 10-hand sets, scrollable strip, or day-grouped list. */
 export function HandStrengthTimeline({
   blocks,
   blockSize = 10,
@@ -1002,6 +1142,17 @@ export function HandStrengthTimeline({
 }) {
   const [blockIndex, setBlockIndex] = useState(() => Math.max(0, blocks.length - 1))
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [view, setView] = useState<'blocks' | 'strip' | 'list'>('blocks')
+  const { hidden, toggle } = useStrengthFilter()
+
+  const allPoints = blocks.flatMap(b => b.hands)
+  const visiblePoints = allPoints.filter(h => !hidden.has(h.stronger))
+  const active = activeId ? allPoints.find(h => h.handId === activeId) ?? null : null
+
+  const { zoomIn, zoomOut, scrollRef, itemPx } = useChartZoomScroll(
+    visiblePoints.length || allPoints.length,
+    view === 'strip'
+  )
 
   useEffect(() => {
     setBlockIndex(Math.max(0, blocks.length - 1))
@@ -1012,11 +1163,16 @@ export function HandStrengthTimeline({
   }
 
   const block = blocks[Math.min(blockIndex, blocks.length - 1)]!
-  const active = activeId ? block.hands.find(h => h.handId === activeId) : null
   const maxScoreInBlock = Math.max(
     ...block.hands.flatMap(h => [h.playerScore, h.dealerScore ?? 0]),
     1
   )
+  const maxScoreInStrip = Math.max(
+    ...visiblePoints.flatMap(h => [h.playerScore, h.dealerScore ?? 0]),
+    1
+  )
+  const stripWidth = Math.max(chartContentWidth(visiblePoints.length, itemPx), 1)
+  const listGroups = groupStrengthByDate([...visiblePoints].reverse())
 
   const dateRange = (() => {
     try {
@@ -1028,187 +1184,294 @@ export function HandStrengthTimeline({
     }
   })()
 
+  const presentTypes = [...new Set(allPoints.map(h => h.stronger))]
+
   return (
     <div className="w-full touch-manipulation">
-      <div className="flex items-center justify-between gap-2 mb-2">
+      <div className="flex gap-1 mb-2">
         <button
           type="button"
-          disabled={blockIndex <= 0}
-          onClick={() => setBlockIndex(i => Math.max(0, i - 1))}
-          className="w-8 h-8 rounded-lg bg-white/10 text-white/70 disabled:opacity-30 font-bold"
-          aria-label="Older 10 hands"
+          onClick={() => setView('blocks')}
+          className={`flex-1 py-1 rounded-lg text-[10px] font-semibold ${view === 'blocks' ? 'bg-gold/25 text-gold' : 'bg-white/5 text-white/50'}`}
         >
-          ‹
+          Sets of {blockSize}
         </button>
-        <div className="text-center flex-1 min-w-0">
-          <p className="text-xs font-bold text-gold truncate">
-            Hands {block.startHand}–{block.endHand}
-          </p>
-          <p className="text-[9px] text-white/40">
-            Set {blockIndex + 1} of {blocks.length} · {blockSize} per page{dateRange ? ` · ${dateRange}` : ''}
-          </p>
-        </div>
         <button
           type="button"
-          disabled={blockIndex >= blocks.length - 1}
-          onClick={() => setBlockIndex(i => Math.min(blocks.length - 1, i + 1))}
-          className="w-8 h-8 rounded-lg bg-white/10 text-white/70 disabled:opacity-30 font-bold"
-          aria-label="Newer 10 hands"
+          onClick={() => setView('strip')}
+          className={`flex-1 py-1 rounded-lg text-[10px] font-semibold ${view === 'strip' ? 'bg-gold/25 text-gold' : 'bg-white/5 text-white/50'}`}
         >
-          ›
+          Timeline strip
+        </button>
+        <button
+          type="button"
+          onClick={() => setView('list')}
+          className={`flex-1 py-1 rounded-lg text-[10px] font-semibold ${view === 'list' ? 'bg-gold/25 text-gold' : 'bg-white/5 text-white/50'}`}
+        >
+          Timeline list
         </button>
       </div>
 
-      <div className="grid grid-cols-4 gap-1 mb-2 text-center text-[9px]">
-        <div className="rounded-lg bg-emerald-950/40 border border-emerald-500/20 py-1.5">
-          <p className="font-bold text-emerald-400">{block.playerStrongerCount}</p>
-          <p className="text-white/40">You stronger</p>
-        </div>
-        <div className="rounded-lg bg-red-950/40 border border-red-500/20 py-1.5">
-          <p className="font-bold text-red-400">{block.dealerStrongerCount}</p>
-          <p className="text-white/40">Dealer stronger</p>
-        </div>
-        <div className="rounded-lg bg-white/5 border border-white/10 py-1.5">
-          <p className="font-bold text-white/70">{block.tieCount}</p>
-          <p className="text-white/40">Tied</p>
-        </div>
-        <div className="rounded-lg bg-white/5 border border-white/10 py-1.5">
-          <p className={`font-bold ${block.blockPnL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {formatPnLShort(block.blockPnL)}
-          </p>
-          <p className="text-white/40">Block P&amp;L</p>
-        </div>
-      </div>
-
-      {block.avgDealerScore != null && (
-        <div className="mb-3 rounded-lg bg-black/30 border border-white/10 p-2">
-          <p className="text-[9px] text-white/40 mb-1.5 text-center">Average strength this set (dealer logged)</p>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="text-[9px] text-emerald-400/90 w-8 shrink-0">You</span>
-              <div className="flex-1 h-2.5 rounded-full bg-white/5 overflow-hidden">
-                <div
-                  className="h-full bg-emerald-500/80 rounded-full"
-                  style={{ width: `${strengthPct(block.avgPlayerScore)}%` }}
-                />
-              </div>
-              <span className="text-[9px] text-white/50 w-10 text-right shrink-0">{Math.round(block.avgPlayerScore)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[9px] text-red-400/90 w-8 shrink-0">Dlr</span>
-              <div className="flex-1 h-2.5 rounded-full bg-white/5 overflow-hidden">
-                <div
-                  className="h-full bg-red-400/80 rounded-full"
-                  style={{ width: `${strengthPct(block.avgDealerScore)}%` }}
-                />
-              </div>
-              <span className="text-[9px] text-white/50 w-10 text-right shrink-0">{Math.round(block.avgDealerScore)}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="rounded-lg bg-black/20 border border-white/10 p-2 mb-2">
-        <div className="flex justify-between text-[8px] text-white/40 mb-1 px-0.5">
-          <span className="text-emerald-400/80">You</span>
-          <span className="text-red-400/80">Dealer</span>
-        </div>
-        <div className="flex items-end justify-between gap-0.5" style={{ height: 72 }}>
-          {block.hands.map(h => {
-            const playerH = (h.playerScore / maxScoreInBlock) * 100
-            const dealerH = h.dealerScore != null ? (h.dealerScore / maxScoreInBlock) * 100 : 0
-            const isActive = activeId === h.handId
+      {(view === 'strip' || view === 'list') && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {STRENGTH_LEGEND.filter(l => presentTypes.includes(l.stronger)).map(l => {
+            const isHidden = hidden.has(l.stronger)
+            const count = allPoints.filter(h => h.stronger === l.stronger).length
             return (
               <button
-                key={h.handId}
+                key={l.stronger}
                 type="button"
-                onClick={() => setActiveId(prev => (prev === h.handId ? null : h.handId))}
-                className={`flex-1 min-w-0 flex flex-col items-center justify-end h-full gap-0.5 p-0 border-0 bg-transparent ${
-                  isActive ? 'opacity-100' : 'opacity-90 hover:opacity-100'
+                onClick={() => toggle(l.stronger)}
+                className={`px-2 py-0.5 rounded-full text-[9px] font-medium border transition-opacity ${
+                  isHidden ? 'opacity-40 border-white/10' : 'border-white/20'
                 }`}
-                aria-label={`Hand ${h.handNum}: ${strengthWinnerLabel(h)}`}
               >
-                <div className="flex items-end justify-center gap-px w-full h-14">
-                  <div
-                    className={`w-[42%] rounded-t-sm bg-emerald-500/75 ${isActive ? 'ring-1 ring-gold/50' : ''}`}
-                    style={{ height: `${Math.max(8, playerH)}%` }}
-                  />
-                  <div
-                    className={`w-[42%] rounded-t-sm ${h.dealerScore != null ? 'bg-red-400/75' : 'bg-white/15 border border-dashed border-white/20'}`}
-                    style={{ height: `${Math.max(h.dealerScore != null ? 8 : 12, dealerH)}%` }}
-                  />
-                </div>
-                <span className="text-[7px] text-white/45 leading-none">{h.handNum}</span>
+                <span
+                  className="inline-block w-2 h-2 rounded-sm mr-1 align-middle"
+                  style={{ background: l.color }}
+                />
+                {l.label} ({count})
               </button>
             )
           })}
         </div>
-      </div>
+      )}
 
-      <ul className="max-h-40 overflow-y-auto rounded-lg bg-black/20 border border-white/5 divide-y divide-white/5">
-        {[...block.hands].reverse().map(h => (
-          <li key={h.handId}>
+      {view === 'blocks' && (
+        <>
+          <div className="flex items-center justify-between gap-2 mb-2">
             <button
               type="button"
-              onClick={() => setActiveId(prev => (prev === h.handId ? null : h.handId))}
-              className={`w-full flex items-start gap-2 py-2 px-2 text-left ${activeId === h.handId ? 'bg-gold/10' : 'hover:bg-white/5'}`}
+              disabled={blockIndex <= 0}
+              onClick={() => setBlockIndex(i => Math.max(0, i - 1))}
+              className="w-8 h-8 rounded-lg bg-white/10 text-white/70 disabled:opacity-30 font-bold"
+              aria-label="Older 10 hands"
             >
-              <span className="text-[10px] text-white/40 w-8 shrink-0 pt-0.5">#{h.handNum}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-emerald-400/90 truncate">{h.playerLabel}</p>
-                <p className="text-[10px] text-red-400/80 truncate">
-                  {h.dealerLabel ?? 'Dealer not logged'}{h.action === 'fold' ? ' · fold' : ''}
-                </p>
-              </div>
-              <div className="text-right shrink-0">
-                <p className={`text-[9px] font-semibold ${
-                  h.stronger === 'player' ? 'text-emerald-400' : h.stronger === 'dealer' ? 'text-red-400' : 'text-white/40'
-                }`}>
-                  {h.stronger === 'player' ? 'You +' : h.stronger === 'dealer' ? 'Dlr +' : h.stronger === 'tie' ? 'Tie' : '—'}
-                </p>
-                <p className={`text-[10px] font-bold ${h.netResult >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {formatPnLShort(h.netResult)}
-                </p>
-              </div>
+              ‹
             </button>
-          </li>
-        ))}
-      </ul>
-
-      {active && (
-        <div className="mt-2 rounded-lg bg-slate-800/95 border border-gold/25 px-3 py-2 relative">
-          <button
-            type="button"
-            onClick={() => setActiveId(null)}
-            className="absolute top-1.5 right-2 text-white/30 hover:text-white text-sm"
-            aria-label="Close"
-          >
-            ×
-          </button>
-          <p className="text-[10px] text-white/45 pr-6">
-            Hand {active.handNum} · {formatHandTimestamp(active.createdAt)}
-          </p>
-          <p className="text-sm font-bold mt-0.5 text-gold">{strengthWinnerLabel(active)}</p>
-          <div className="grid grid-cols-2 gap-2 mt-1 text-[10px]">
-            <div>
-              <p className="text-emerald-400/80">You · {active.playerScore}</p>
-              <p className="text-white/60 truncate">{active.playerLabel}</p>
-            </div>
-            <div>
-              <p className="text-red-400/80">
-                Dealer · {active.dealerScore != null ? active.dealerScore : '—'}
+            <div className="text-center flex-1 min-w-0">
+              <p className="text-xs font-bold text-gold truncate">
+                Hands {block.startHand}–{block.endHand}
               </p>
-              <p className="text-white/60 truncate">{active.dealerLabel ?? 'Not logged'}</p>
+              <p className="text-[9px] text-white/40">
+                Set {blockIndex + 1} of {blocks.length} · {blockSize} per page{dateRange ? ` · ${dateRange}` : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={blockIndex >= blocks.length - 1}
+              onClick={() => setBlockIndex(i => Math.min(blocks.length - 1, i + 1))}
+              className="w-8 h-8 rounded-lg bg-white/10 text-white/70 disabled:opacity-30 font-bold"
+              aria-label="Newer 10 hands"
+            >
+              ›
+            </button>
+          </div>
+
+          <div className="grid grid-cols-4 gap-1 mb-2 text-center text-[9px]">
+            <div className="rounded-lg bg-emerald-950/40 border border-emerald-500/20 py-1.5">
+              <p className="font-bold text-emerald-400">{block.playerStrongerCount}</p>
+              <p className="text-white/40">You stronger</p>
+            </div>
+            <div className="rounded-lg bg-red-950/40 border border-red-500/20 py-1.5">
+              <p className="font-bold text-red-400">{block.dealerStrongerCount}</p>
+              <p className="text-white/40">Dealer stronger</p>
+            </div>
+            <div className="rounded-lg bg-white/5 border border-white/10 py-1.5">
+              <p className="font-bold text-white/70">{block.tieCount}</p>
+              <p className="text-white/40">Tied</p>
+            </div>
+            <div className="rounded-lg bg-white/5 border border-white/10 py-1.5">
+              <p className={`font-bold ${block.blockPnL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {formatPnLShort(block.blockPnL)}
+              </p>
+              <p className="text-white/40">Block P&amp;L</p>
             </div>
           </div>
-          <p className={`text-sm font-bold mt-1 ${active.netResult >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {formatPnLShort(active.netResult)} · {active.action}
-          </p>
+
+          {block.avgDealerScore != null && (
+            <div className="mb-3 rounded-lg bg-black/30 border border-white/10 p-2">
+              <p className="text-[9px] text-white/40 mb-1.5 text-center">Average strength this set (dealer logged)</p>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] text-emerald-400/90 w-8 shrink-0">You</span>
+                  <div className="flex-1 h-2.5 rounded-full bg-white/5 overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500/80 rounded-full"
+                      style={{ width: `${strengthPct(block.avgPlayerScore)}%` }}
+                    />
+                  </div>
+                  <span className="text-[9px] text-white/50 w-10 text-right shrink-0">{Math.round(block.avgPlayerScore)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] text-red-400/90 w-8 shrink-0">Dlr</span>
+                  <div className="flex-1 h-2.5 rounded-full bg-white/5 overflow-hidden">
+                    <div
+                      className="h-full bg-red-400/80 rounded-full"
+                      style={{ width: `${strengthPct(block.avgDealerScore)}%` }}
+                    />
+                  </div>
+                  <span className="text-[9px] text-white/50 w-10 text-right shrink-0">{Math.round(block.avgDealerScore)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-lg bg-black/20 border border-white/10 p-2 mb-2">
+            <div className="flex justify-between text-[8px] text-white/40 mb-1 px-0.5">
+              <span className="text-emerald-400/80">You</span>
+              <span className="text-red-400/80">Dealer</span>
+            </div>
+            <div className="flex items-end justify-between gap-0.5" style={{ height: 72 }}>
+              {block.hands.map(h => (
+                <StrengthDualBarHand
+                  key={h.handId}
+                  h={h}
+                  maxScore={maxScoreInBlock}
+                  isActive={activeId === h.handId}
+                  onSelect={() => setActiveId(prev => (prev === h.handId ? null : h.handId))}
+                />
+              ))}
+            </div>
+          </div>
+
+          <ul className="max-h-40 overflow-y-auto rounded-lg bg-black/20 border border-white/5 divide-y divide-white/5">
+            {[...block.hands].reverse().map(h => (
+              <li key={h.handId}>
+                <button
+                  type="button"
+                  onClick={() => setActiveId(prev => (prev === h.handId ? null : h.handId))}
+                  className={`w-full flex items-start gap-2 py-2 px-2 text-left ${activeId === h.handId ? 'bg-gold/10' : 'hover:bg-white/5'}`}
+                >
+                  <span className="text-[10px] text-white/40 w-8 shrink-0 pt-0.5">#{h.handNum}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] text-emerald-400/90 truncate">{h.playerLabel}</p>
+                    <p className="text-[10px] text-red-400/80 truncate">
+                      {h.dealerLabel ?? 'Dealer not logged'}{h.action === 'fold' ? ' · fold' : ''}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className={`text-[9px] font-semibold ${
+                      h.stronger === 'player' ? 'text-emerald-400' : h.stronger === 'dealer' ? 'text-red-400' : 'text-white/40'
+                    }`}>
+                      {h.stronger === 'player' ? 'You +' : h.stronger === 'dealer' ? 'Dlr +' : h.stronger === 'tie' ? 'Tie' : '—'}
+                    </p>
+                    <p className={`text-[10px] font-bold ${h.netResult >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {formatPnLShort(h.netResult)}
+                    </p>
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {view === 'strip' && (
+        <>
+          {visiblePoints.length === 0 ? (
+            <p className="text-xs text-white/40 text-center py-8">All strength types hidden — tap keys above</p>
+          ) : (
+            <>
+              <ChartZoomControls
+                title={`${visiblePoints.length} of ${allPoints.length} hands · oldest ← → newest`}
+                total={visiblePoints.length}
+                onZoomIn={zoomIn}
+                onZoomOut={zoomOut}
+                scrollable
+              />
+              <div
+                ref={scrollRef}
+                className="overflow-x-auto overflow-y-hidden scroll-smooth rounded-lg bg-black/20 border border-white/10 p-1 -mx-0.5 px-0.5"
+                style={{ WebkitOverflowScrolling: 'touch' }}
+              >
+                <div style={{ width: stripWidth }}>
+                  <div className="flex justify-between text-[8px] text-white/40 mb-0.5 px-0.5">
+                    <span className="text-emerald-400/80">You</span>
+                    <span className="text-red-400/80">Dealer</span>
+                  </div>
+                  <div className="flex items-end" style={{ height: 72 }}>
+                    {visiblePoints.map(h => (
+                      <StrengthDualBarHand
+                        key={h.handId}
+                        h={h}
+                        maxScore={maxScoreInStrip}
+                        itemPx={itemPx}
+                        isActive={activeId === h.handId}
+                        onSelect={() => setActiveId(prev => (prev === h.handId ? null : h.handId))}
+                      />
+                    ))}
+                  </div>
+                  <ChartAxisFooter
+                    pointCount={visiblePoints.length}
+                    itemPx={itemPx}
+                    step={10}
+                    dates={visiblePoints.map(h => h.createdAt)}
+                    handNums={visiblePoints.map(h => h.handNum)}
+                    mode="hand"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {view === 'list' && (
+        <div className="max-h-72 overflow-y-auto rounded-lg bg-black/20 border border-white/5">
+          {listGroups.length === 0 ? (
+            <p className="text-xs text-white/40 text-center py-8">All strength types hidden — tap keys above</p>
+          ) : (
+            listGroups.map(group => (
+              <div key={group.date} className="border-b border-white/5 last:border-0">
+                <p className="text-[10px] font-semibold text-gold/90 px-3 py-2 sticky top-0 bg-slate-900/95 backdrop-blur-sm border-b border-white/5">
+                  {group.date}
+                </p>
+                <ul className="px-2 pb-2">
+                  {group.hands.map(h => {
+                    const legend = STRENGTH_LEGEND.find(l => l.stronger === h.stronger)
+                    return (
+                      <li key={h.handId}>
+                        <button
+                          type="button"
+                          onClick={() => setActiveId(prev => (prev === h.handId ? null : h.handId))}
+                          className={`w-full flex items-center gap-2 py-2 px-1 rounded-lg text-left transition-colors ${
+                            activeId === h.handId ? 'bg-gold/10' : 'hover:bg-white/5'
+                          }`}
+                        >
+                          <span
+                            className="w-1.5 self-stretch rounded-full shrink-0"
+                            style={{ background: legend?.color ?? '#64748b' }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-white/80">
+                              Hand {h.handNum} · <span style={{ color: legend?.color }}>{strengthWinnerLabel(h)}</span>
+                              {h.action === 'fold' ? ' · fold' : ''}
+                            </p>
+                            <p className="text-[10px] text-white/40 truncate">
+                              {h.playerLabel} vs {h.dealerLabel ?? '—'} · {formatHandTimestamp(h.createdAt)}
+                            </p>
+                          </div>
+                          <span className={`text-xs font-bold shrink-0 ${h.netResult >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {formatPnLShort(h.netResult)}
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ))
+          )}
         </div>
       )}
 
+      {active && <StrengthDetailPanel active={active} onClose={() => setActiveId(null)} />}
+
       <p className="text-[9px] text-white/30 mt-2 text-center">
-        ‹ › = older / newer sets of {blockSize} · green = you · red = dealer · dashed = dealer not logged
+        {view === 'blocks'
+          ? `‹ › = older / newer sets of ${blockSize} · green = you · red = dealer · dashed = dealer not logged`
+          : 'Tap legend to filter · strip scrolls oldest (left) to newest (right) · green/red = you vs dealer bars'}
       </p>
     </div>
   )
