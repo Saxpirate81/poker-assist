@@ -550,7 +550,7 @@ function scoreLoggedHand(h: LoggedCaribbeanHand, handNum: number): HandStrengthP
     playerScore: playerEval?.score ?? 0,
     playerLabel: playerEval?.label ?? (h.playerHand || '—'),
     dealerScore: dealerEval?.score ?? null,
-    dealerLabel: dealerEval?.label ?? (dealerComplete ? h.dealerHand : null),
+    dealerLabel: dealerEval?.label ?? (dealerComplete ? (h.dealerHand || null) : null),
     dealerComplete,
     stronger,
     netResult: h.netResult,

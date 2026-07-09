@@ -69,15 +69,21 @@ export function validateTableForScore(
   const tableCheck = validateTableForBet(playerCards, dealerUp)
   if (!tableCheck.ok) return tableCheck
 
-  if (action === 'raise') {
-    const dealerCheck = validateFullDealerHand(dealerUp, dealerHole)
-    if (!dealerCheck.ok) return dealerCheck
-    const dup = findDuplicateCards(playerCards, dealerUp ? [dealerUp, ...dealerHole] : [])
-    if (dup) return { ok: false, message: dup }
-  } else if (dealerHole.length > 0 && dealerUp) {
-    const dup = findDuplicateCards(playerCards, [dealerUp, ...dealerHole])
-    if (dup) return { ok: false, message: dup }
+  const dealerCheck = validateFullDealerHand(dealerUp, dealerHole)
+  if (!dealerCheck.ok) {
+    if (action === 'fold') {
+      return {
+        ok: false,
+        message: dealerHole.length === 0
+          ? 'After fold, log all 5 dealer cards (they are shown on the table)'
+          : `Need all 5 dealer cards after fold (have ${dealerHole.length + 1}/5)`,
+      }
+    }
+    return dealerCheck
   }
+
+  const dup = findDuplicateCards(playerCards, [dealerUp!, ...dealerHole])
+  if (dup) return { ok: false, message: dup }
 
   return { ok: true }
 }

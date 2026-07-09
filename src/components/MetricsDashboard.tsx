@@ -80,7 +80,7 @@ const METRIC_HELP: Record<string, { title: string; body: string }> = {
   },
   handStrength: {
     title: 'Hand strength — you vs dealer',
-    body: 'Compares evaluated hand strength (pair beats high card, etc.) for your 5 cards vs the dealer\'s 5 when logged. Grouped in sets of 10 hands — use ‹ › to move between sets. Folds without a full dealer hand show dashed dealer bars.',
+    body: 'Compares evaluated hand strength for your 5 cards vs the dealer\'s 5. Folds count too — after you fold, log the dealer hand you see (same as a raise). Grouped in sets of 10 hands — use ‹ › to move between sets. Older folds logged without dealer cards show dashed bars.',
   },
 }
 

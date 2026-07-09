@@ -117,17 +117,17 @@ export function CaribbeanStudBoard({
 
   const handleDecision = (action: 'raise' | 'fold') => {
     setLastAction(action)
-    if (action === 'fold') {
-      finalizeHand('fold', [])
-      return
-    }
     setRevealDealer(true)
-    setShowdownResult(`Raised $${raiseAmt} — tap dealer cards to score`)
+    setShowdownResult(
+      action === 'fold'
+        ? 'Folded — log all 5 dealer cards (shown on table)'
+        : `Raised $${raiseAmt} — tap dealer cards to score`
+    )
   }
 
   useEffect(() => {
-    if (revealDealer && lastAction === 'raise' && dealerCards.length === 5) {
-      finalizeHand('raise', dealerCards)
+    if (revealDealer && lastAction && dealerCards.length === 5) {
+      finalizeHand(lastAction, dealerCards)
     }
   }, [revealDealer, lastAction, dealerCards.length])
 

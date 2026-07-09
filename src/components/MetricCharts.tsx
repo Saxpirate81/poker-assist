@@ -989,7 +989,7 @@ function strengthWinnerLabel(p: HandStrengthPoint): string {
   if (p.stronger === 'player') return 'You stronger'
   if (p.stronger === 'dealer') return 'Dealer stronger'
   if (p.stronger === 'tie') return 'Same strength'
-  return 'No dealer hand'
+  return 'Dealer not logged'
 }
 
 /** You vs dealer hand strength — paginated blocks of 10 hands. */
@@ -1082,7 +1082,7 @@ export function HandStrengthTimeline({
 
       {block.avgDealerScore != null && (
         <div className="mb-3 rounded-lg bg-black/30 border border-white/10 p-2">
-          <p className="text-[9px] text-white/40 mb-1.5 text-center">Average strength this set (showdown hands)</p>
+          <p className="text-[9px] text-white/40 mb-1.5 text-center">Average strength this set (dealer logged)</p>
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
               <span className="text-[9px] text-emerald-400/90 w-8 shrink-0">You</span>
@@ -1157,7 +1157,7 @@ export function HandStrengthTimeline({
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] text-emerald-400/90 truncate">{h.playerLabel}</p>
                 <p className="text-[10px] text-red-400/80 truncate">
-                  {h.dealerLabel ?? (h.action === 'fold' ? 'Fold — dealer not shown' : 'Dealer incomplete')}
+                  {h.dealerLabel ?? 'Dealer not logged'}{h.action === 'fold' ? ' · fold' : ''}
                 </p>
               </div>
               <div className="text-right shrink-0">
@@ -1208,7 +1208,7 @@ export function HandStrengthTimeline({
       )}
 
       <p className="text-[9px] text-white/30 mt-2 text-center">
-        ‹ › = older / newer sets of {blockSize} · green = you · red = dealer · dashed = no full dealer hand
+        ‹ › = older / newer sets of {blockSize} · green = you · red = dealer · dashed = dealer not logged
       </p>
     </div>
   )

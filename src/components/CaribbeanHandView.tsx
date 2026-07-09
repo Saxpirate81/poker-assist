@@ -311,7 +311,7 @@ export function CaribbeanHandView({
         : step === 'bet' ? (shouldRaise ? (raiseReason || 'Strategy says raise') : `Fold saves ${formatMoneyWithSymbol(raiseAmt)}`)
           : step === 'showdown'
             ? (betAction === 'fold'
-              ? `Snap dealer hand (${dealerRest.length}/4 hole) or tap`
+              ? `Log dealer hand after fold (${dealerRest.length}/4 hole) — snap or tap all 5`
               : `Snap dealer hand (${dealerRest.length}/4 hole) · ${showdownPreview?.valid ? 'scoring…' : 'tap or photo'}`)
             : (resultText ?? 'Hand complete')
 
@@ -497,18 +497,10 @@ export function CaribbeanHandView({
               </div>
             )}
 
-            {step === 'showdown' && (
-              <div className="text-center py-0.5">
-                {betAction === 'fold' && dealerRest.length < 4 && (
-                  <button
-                    type="button"
-                    onClick={() => dealerUp && finalizeHand('fold', [dealerUp, ...dealerRest])}
-                    className="text-[10px] text-white/40 underline hover:text-white/60"
-                  >
-                    Finish without full dealer hand
-                  </button>
-                )}
-              </div>
+            {step === 'showdown' && betAction === 'fold' && dealerRest.length < 4 && (
+              <p className="text-[10px] text-center text-white/45 py-0.5">
+                Dealer cards are shown after fold — log all 5 for strength stats
+              </p>
             )}
 
             {step === 'done' && (
