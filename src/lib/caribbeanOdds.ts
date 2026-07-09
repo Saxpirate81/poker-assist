@@ -20,12 +20,14 @@ const DEALER_NO_QUAL = 0.31
 const DEALER_QUAL = 0.69
 
 function winRateWhenQualified(hand: EvaluatedHand): number {
-  if (hand.score >= 800) return 0.92
-  if (hand.score >= 600) return 0.84
-  if (hand.score >= 400) return 0.74
-  if (hand.score >= 300) return 0.62
-  if (hand.score >= 200) return 0.54
-  return 0.38
+  // Estimated P(win | dealer qualifies) — never 100%; strong hands still lose sometimes.
+  if (hand.score >= 800) return 0.82
+  if (hand.score >= 600) return 0.72
+  if (hand.score >= 400) return 0.62
+  if (hand.score >= 300) return 0.52
+  if (hand.score >= 200) return 0.45
+  if (hand.score >= 100) return 0.36
+  return 0.28
 }
 
 function avgWinAmount(ante: number, raiseAmt: number, progressive: number, hand: EvaluatedHand): number {
@@ -55,9 +57,10 @@ export function analyzeCaribbeanBet(
   const winWhenQual = winRateWhenQualified(hand)
   const pushWhenQual = hand.score >= 200 ? 0.02 : 0.01
 
-  const winPct = Math.round((DEALER_NO_QUAL + DEALER_QUAL * winWhenQual) * 100)
+  const rawWin = (DEALER_NO_QUAL + DEALER_QUAL * winWhenQual) * 100
+  const winPct = Math.min(92, Math.round(rawWin))
   const pushPct = Math.round(DEALER_QUAL * pushWhenQual * 100)
-  const losePct = Math.max(0, 100 - winPct - pushPct)
+  const losePct = Math.max(3, 100 - winPct - pushPct)
 
   const foldEv = -(ante + progressive)
   const raiseEv =
@@ -67,8 +70,8 @@ export function analyzeCaribbeanBet(
 
   const evDiff = raiseEv - foldEv
   const confidence = raise
-    ? Math.min(0.97, 0.72 + hand.score / 2000 + (evDiff > 0 ? 0.08 : 0))
-    : Math.min(0.94, 0.78 + Math.abs(evDiff) / (ante + raiseAmt + 1))
+    ? Math.min(0.92, 0.68 + hand.score / 2500 + (evDiff > 0 ? 0.06 : 0))
+    : Math.min(0.88, 0.72 + Math.abs(evDiff) / (ante + raiseAmt + 1))
 
   let reason = ''
   if (hand.score >= 200) reason = `${hand.label} — standard raise`

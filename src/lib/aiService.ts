@@ -384,7 +384,10 @@ export async function getAiAdvice(
         raiseMult,
       })
       const gemini = await getGeminiAdvice(prompt)
-      if (gemini) return { ...baseline, ...gemini, provider: 'gemini' }
+      if (gemini) {
+        const confidence = Math.min(0.92, Math.max(0.5, gemini.confidence ?? 0.8))
+        return { ...baseline, ...gemini, confidence, provider: 'gemini' }
+      }
     }
   }
 
@@ -420,7 +423,8 @@ Respond ONLY with JSON: {"verdict":"good|bad|neutral|warning","headline":"short"
           const jsonMatch = content.match(/\{[\s\S]*\}/)
           if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]) as AiAdvice
-            return { ...baseline, ...parsed, provider: 'openai' }
+            const confidence = Math.min(0.92, Math.max(0.5, parsed.confidence ?? 0.8))
+            return { ...baseline, ...parsed, confidence, provider: 'openai' }
           }
         }
       } catch { /* fall through */ }

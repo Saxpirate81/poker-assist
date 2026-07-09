@@ -14,6 +14,12 @@ interface CaribbeanAnalysisBarProps {
   dense?: boolean
 }
 
+/** Coach certainty — not the same as win probability. */
+function coachConfidencePct(aiAdvice: AiAdvice | null, analysis: CaribbeanBetAnalysis): number {
+  const raw = aiAdvice?.confidence ?? analysis.confidence
+  return Math.min(92, Math.max(50, Math.round(raw * 100)))
+}
+
 export function CaribbeanAnalysisBar({
   analysis,
   aiAdvice,
@@ -42,6 +48,7 @@ export function CaribbeanAnalysisBar({
   const isRaise = recommend === 'raise'
   const headline = aiAdvice?.headline ?? (isRaise ? `Raise ${formatMoneyWithSymbol(raiseAmt)}` : 'Fold')
   const detail = aiAdvice?.detail ?? analysis.reason
+  const coachPct = coachConfidencePct(aiAdvice, analysis)
 
   return (
     <div className={`rounded-lg border-2 overflow-hidden ${isRaise ? 'border-emerald-500/50' : 'border-red-500/50'}`}>
@@ -55,15 +62,19 @@ export function CaribbeanAnalysisBar({
         </div>
         <div className="shrink-0 text-right">
           <p className="text-[9px] text-white/40">{coachLabel}{isSupabaseConfigured() ? ' · ☁️' : ''}</p>
-          <p className={`font-bold ${dense ? 'text-[10px]' : 'text-xs'}`}>{Math.round((aiAdvice?.confidence ?? analysis.confidence) * 100)}%</p>
+          <p className={`font-bold ${dense ? 'text-[10px]' : 'text-xs'}`} title="How sure the coach is — not win odds">
+            Coach {coachPct}%
+          </p>
         </div>
       </div>
+
+      <p className="text-[8px] text-center text-white/30 bg-black/40 py-0.5">Est. raise outcomes (not guaranteed)</p>
 
       <div className="grid grid-cols-4 divide-x divide-white/10 bg-black/50 text-center">
         <OddsCell label="Win" pct={analysis.winPct} color="text-emerald-400" dense={dense} />
         <OddsCell label="Lose" pct={analysis.losePct} color="text-red-400" dense={dense} />
-        <OddsCell label="Dlr NQ" pct={analysis.dealerNoQualPct} color="text-sky-400" sub="free win" dense={dense} />
-        <OddsCell label="Fold" pct={100} color="text-amber-400" sub={`-${formatMoneyWithSymbol(ante)}`} dense={dense} />
+        <OddsCell label="Dlr NQ" pct={analysis.dealerNoQualPct} color="text-sky-400" sub="ante paid" dense={dense} />
+        <FoldCostCell ante={ante} dense={dense} />
       </div>
 
       {!dense && (
@@ -97,9 +108,18 @@ export function CaribbeanAnalysisBar({
 function OddsCell({ label, pct, color, sub, dense }: { label: string; pct: number; color: string; sub?: string; dense?: boolean }) {
   return (
     <div className={dense ? 'py-1 px-0.5' : 'py-1.5 px-1'}>
-      <p className={`font-bold leading-none ${color} ${dense ? 'text-sm' : 'text-base'}`}>{pct}%</p>
+      <p className={`font-bold leading-none ${color} ${dense ? 'text-sm' : 'text-base'}`}>~{pct}%</p>
       <p className={`text-white/40 ${dense ? 'text-[8px] mt-0' : 'text-[9px] mt-0.5'}`}>{label}</p>
       {sub && <p className="text-[8px] text-white/30">{sub}</p>}
+    </div>
+  )
+}
+
+function FoldCostCell({ ante, dense }: { ante: number; dense?: boolean }) {
+  return (
+    <div className={dense ? 'py-1 px-0.5' : 'py-1.5 px-1'}>
+      <p className={`font-bold leading-none text-amber-400 ${dense ? 'text-sm' : 'text-base'}`}>−{formatMoneyWithSymbol(ante)}</p>
+      <p className={`text-white/40 ${dense ? 'text-[8px] mt-0' : 'text-[9px] mt-0.5'}`}>Fold cost</p>
     </div>
   )
 }
