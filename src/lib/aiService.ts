@@ -16,7 +16,7 @@ import {
 import { getRaiseReason, shouldCaribbeanRaise } from './caribbeanFlow'
 import { formatMoneyWithSymbol } from './money'
 import { getAiProvider, getOpenAiApiKey, setOpenAiApiKey } from './config'
-import { buildCaribbeanPrompt, getGeminiAdvice, recognizeCardsFromPhotoGemini, type PhotoReadContext } from './geminiService'
+import { buildCaribbeanPrompt, getGeminiAdvice, recognizeCardsFromPhotoGemini, type PhotoReadContext, type PhotoReadOptions } from './geminiService'
 import { parseVisionResponse } from './photoCardMapping'
 
 export function getApiKey(): string {
@@ -434,7 +434,7 @@ export async function recognizeCardsFromPhoto(
   imageBase64: string,
   expectedCount: number,
   context: PhotoReadContext = 'player-hand',
-  options?: { hasDealerUp?: boolean }
+  options?: PhotoReadOptions
 ): Promise<{ cards: Card[]; parsed: ReturnType<typeof parseVisionResponse>; error?: string }> {
   const gemini = await recognizeCardsFromPhotoGemini(imageBase64, expectedCount, context, options)
   if (gemini.cards.length > 0) return gemini

@@ -49,11 +49,20 @@ function findSlotWithIdentity(
 
 const HOLE_SLOT_IDS = ['d2', 'd3', 'd4', 'd5']
 
+/** Union every dealer card the model returned (object fields + arrays). */
+function collectDealerPool(parsed: ParsedPhotoCards): Card[] {
+  const pool: Card[] = []
+  if (parsed.dealerUp) pool.push(parsed.dealerUp)
+  pool.push(...parsed.dealerHoleCards)
+  pool.push(...parsed.flat)
+  return dedupeCards(pool)
+}
+
 export function countDealerHoles(parsed: ParsedPhotoCards, knownUp: Card | null): number {
   const upId = knownUp ? cardIdentity(knownUp) : (parsed.dealerUp ? cardIdentity(parsed.dealerUp) : null)
-  let holes = parsed.dealerHoleCards.length > 0 ? parsed.dealerHoleCards : dedupeCards(parsed.flat)
+  let holes = collectDealerPool(parsed)
   if (upId) holes = holes.filter(c => cardIdentity(c) !== upId)
-  return dedupeCards(holes).length
+  return holes.length
 }
 
 /** Showdown photos replace the hole row — allow reorder without duplicate skips. */
@@ -93,10 +102,7 @@ function mapShowdownDealer(
   const knownUp = existing['d1'] ?? parsed.dealerUp
   const upId = knownUp ? cardIdentity(knownUp) : null
 
-  let holes = parsed.dealerHoleCards.length > 0
-    ? parsed.dealerHoleCards
-    : dedupeCards(parsed.flat)
-
+  let holes = collectDealerPool(parsed)
   holes = holes.filter(c => !players.has(cardIdentity(c)))
   if (upId) {
     holes = holes.filter(c => cardIdentity(c) !== upId)
@@ -226,22 +232,29 @@ export function parseVisionResponse(text: string, context: PhotoReadContext): Pa
   }
   if (context === 'dealer-rest') {
     const obj = extractJsonObject(text)
-    if (obj && ('dealerUp' in obj || 'dealerHoleCards' in obj)) {
+    const arr = extractJsonArray(text)
+    const arrCards = parseCardList(arr ?? [])
+    let dealerUp: Card | null = null
+    let dealerHoleCards: Card[] = []
+
+    if (obj && ('dealerUp' in obj || 'dealerHoleCards' in obj || 'dealerCards' in obj)) {
       const dealerRaw = obj.dealerUp
-      const dealerUp = dealerRaw && typeof dealerRaw === 'object' && dealerRaw !== null
+      dealerUp = dealerRaw && typeof dealerRaw === 'object' && dealerRaw !== null
         ? normalizeCardFromAi(dealerRaw as { rank?: string; suit?: string })
         : null
-      const dealerHoleCards = stripTableDuplicates(dealerUp, parseCardList(obj.dealerHoleCards))
-      const flat = [...(dealerUp ? [dealerUp] : []), ...dealerHoleCards]
+      if ('dealerHoleCards' in obj) {
+        dealerHoleCards = parseCardList(obj.dealerHoleCards)
+      }
+      if ('dealerCards' in obj) {
+        const all = dedupeCards(parseCardList(obj.dealerCards))
+        if (!dealerUp) dealerUp = all[0] ?? null
+        dealerHoleCards = [...dealerHoleCards, ...all.slice(dealerUp ? 1 : 0)]
+      }
+      dealerHoleCards = dedupeCards(dealerHoleCards)
+      const flat = dedupeCards([...(dealerUp ? [dealerUp] : []), ...dealerHoleCards, ...arrCards])
       return { dealerUp, playerCards: [], dealerHoleCards, flat }
     }
-    if (obj && 'dealerCards' in obj) {
-      const all = dedupeCards(parseCardList(obj.dealerCards))
-      const dealerUp = all[0] ?? null
-      const dealerHoleCards = stripTableDuplicates(dealerUp, all.slice(1))
-      return { dealerUp, playerCards: [], dealerHoleCards, flat: all }
-    }
-    const deduped = dedupeCards(flat)
+    const deduped = dedupeCards([...arrCards, ...flat])
     return { dealerUp: null, playerCards: [], dealerHoleCards: deduped, flat: deduped }
   }
   return { dealerUp: null, playerCards: flat, dealerHoleCards: [], flat }

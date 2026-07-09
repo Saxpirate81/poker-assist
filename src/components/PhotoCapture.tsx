@@ -38,9 +38,15 @@ export function PhotoCapture({
     setError(null)
     setSuccess(null)
     try {
-      const base64 = await compressImageForAi(file)
+      const base64 = await compressImageForAi(
+        file,
+        context === 'dealer-rest' ? { maxDim: 2048, quality: 0.9 } : undefined
+      )
       const hasDealerUp = !!existingCards['d1']
-      const result = await recognizeCardsFromPhoto(base64, expectedCount, context, { hasDealerUp })
+      const result = await recognizeCardsFromPhoto(base64, expectedCount, context, {
+        hasDealerUp,
+        knownDealerUp: existingCards['d1'] ?? null,
+      })
       if (result.error && result.cards.length === 0) {
         setError(result.error)
         return
