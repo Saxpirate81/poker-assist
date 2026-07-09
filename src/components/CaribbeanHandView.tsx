@@ -26,7 +26,7 @@ import {
   validateTableForBet,
   validateTableForScore,
 } from '../lib/handValidation'
-import { sanitizePhotoMapping } from '../lib/photoCardMapping'
+import { sanitizePhotoMapping, sanitizeShowdownMapping } from '../lib/photoCardMapping'
 import { getCaribbeanStep, getRaiseReason, shouldCaribbeanRaise, type CaribbeanStep } from '../lib/caribbeanFlow'
 import { analyzeCaribbeanBet } from '../lib/caribbeanOdds'
 import {
@@ -255,13 +255,17 @@ export function CaribbeanHandView({
   const showAnalysis = step === 'player' || step === 'bet'
 
   const handlePhotoCards = (mapping: Record<string, Card>) => {
-    const { mapping: clean, warnings } = sanitizePhotoMapping(mapping, state.cards)
+    const sanitize = step === 'showdown' ? sanitizeShowdownMapping : sanitizePhotoMapping
+    const { mapping: clean, warnings } = sanitize(mapping, state.cards)
     if (Object.keys(clean).length === 0) {
       setValidationError(warnings[0] ?? 'No new cards applied from photo')
       return
     }
     setValidationError(null)
-    onUpdateCards({ ...state.cards, ...clean })
+    const base = step === 'showdown'
+      ? { ...state.cards, d2: null, d3: null, d4: null, d5: null }
+      : state.cards
+    onUpdateCards({ ...base, ...clean })
     aiFetchedForHand.current = false
     setLastAiAdvice(null)
     setPhotoRefresh(n => n + 1)

@@ -1,6 +1,6 @@
 import type { AiAdvice, Card } from '../types/poker'
 import { getGeminiApiKey } from './config'
-import { minCardsForContext, parseVisionResponse } from './photoCardMapping'
+import { minCardsForContext, parseVisionResponse, countDealerHoles } from './photoCardMapping'
 
 export type PhotoReadContext = 'dealer-up' | 'player-hand' | 'table' | 'dealer-rest'
 
@@ -36,12 +36,16 @@ Return ONLY: [{"rank":"...","suit":"hearts"|"diamonds"|"clubs"|"spades"}]
 Use T for ten.`
   }
   if (context === 'dealer-rest') {
-    return `Caribbean Stud showdown photo. Find ALL face-up dealer cards (usually 5 total: up-card + 4 hole cards).
-Physical order may vary — return every dealer card you see in ANY order.
+    return `Caribbean Stud showdown photo. Separate the dealer UP-CARD from the 4 HOLE cards.
+
 Return ONLY valid JSON (no markdown):
-{"dealerCards":[{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"}, ...]}
-Include all 5 dealer cards when visible (minimum 4 if only hole cards shown). Use T for ten.
-Do NOT include any player cards.`
+{"dealerUp":{"rank":"A"|"2"-"K"|"T","suit":"hearts"|"diamonds"|"clubs"|"spades"},"dealerHoleCards":[{...},{...},{...},{...}]}
+
+Rules:
+- dealerUp: the single face-up card (may already be known — still include it).
+- dealerHoleCards: EXACTLY 4 cards — the revealed hole cards ONLY, NOT the up-card.
+- Physical order does not matter. Use T for ten.
+- Do NOT include player cards.`
   }
   return `Find exactly ${expectedCount} PLAYER hole cards in this Caribbean Stud photo (the player's row of 5 cards), left to right.
 Do NOT include dealer cards.
@@ -110,11 +114,11 @@ async function callGeminiVision(
         { inline_data: { mime_type: mime, data: base64Data } },
       ],
     }],
-    generationConfig: { temperature: 0.1, maxOutputTokens: context === 'table' ? 1200 : 800 },
+    generationConfig: { temperature: 0.1, maxOutputTokens: context === 'table' ? 1200 : 1000 },
   })
 
   if (!result.ok) {
-    return { cards: [], parsed: { dealerUp: null, playerCards: [], flat: [] }, error: result.error, status: result.status }
+    return { cards: [], parsed: { dealerUp: null, playerCards: [], dealerHoleCards: [], flat: [] }, error: result.error, status: result.status }
   }
 
   const parsed = parseVisionResponse(result.text, context)
@@ -138,7 +142,7 @@ export async function recognizeCardsFromPhotoGemini(
   options?: { hasDealerUp?: boolean }
 ): Promise<{ cards: Card[]; parsed: ReturnType<typeof parseVisionResponse>; error?: string }> {
   const apiKey = getGeminiApiKey()
-  if (!apiKey) return { cards: [], parsed: { dealerUp: null, playerCards: [], flat: [] }, error: 'Add Gemini API key in ⚙️ Settings for photo read.' }
+  if (!apiKey) return { cards: [], parsed: { dealerUp: null, playerCards: [], dealerHoleCards: [], flat: [] }, error: 'Add Gemini API key in ⚙️ Settings for photo read.' }
 
   const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1]! : imageBase64
   const mimeMatch = imageBase64.match(/^data:(image\/[a-z+]+);/i)
@@ -167,13 +171,22 @@ export async function recognizeCardsFromPhotoGemini(
     if (context === 'table' && total >= 6) {
       return { cards: result.cards, parsed: result.parsed }
     }
-    if (context === 'dealer-rest' && total >= 5) {
-      return { cards: result.cards, parsed: result.parsed }
-    }
-    if (context === 'dealer-rest' && total >= 4) {
-      if (!best || total > best.cards.length) {
-        best = { cards: result.cards, parsed: result.parsed }
+    if (context === 'dealer-rest') {
+      const knownUp = result.parsed.dealerUp
+      const holeCount = countDealerHoles(result.parsed, knownUp)
+      if (result.parsed.dealerHoleCards.length >= 4 || holeCount >= 4) {
+        return { cards: result.cards, parsed: result.parsed }
       }
+      if (holeCount >= 3) {
+        const bestHoles = best ? countDealerHoles(best.parsed, best.parsed.dealerUp) : 0
+        if (!best || holeCount > bestHoles) {
+          best = { cards: result.cards, parsed: result.parsed }
+        }
+      }
+      if (result.error) lastError = result.error
+      if (result.error?.includes('API key') || result.error?.includes('403')) break
+      if (!shouldTryNextModel(result.status, result.error)) break
+      continue
     }
     if (total >= expectedCount) {
       return { cards: result.cards, parsed: result.parsed }
@@ -189,16 +202,23 @@ export async function recognizeCardsFromPhotoGemini(
     if (!shouldTryNextModel(result.status, result.error)) break
   }
 
-  if (best && best.cards.length >= minRequired) {
-    return { cards: best.cards, parsed: best.parsed }
+  if (best) {
+    if (context === 'dealer-rest') {
+      const holes = countDealerHoles(best.parsed, best.parsed.dealerUp)
+      if (holes >= minRequired) return { cards: best.cards, parsed: best.parsed }
+    } else if (best.cards.length >= minRequired) {
+      return { cards: best.cards, parsed: best.parsed }
+    }
   }
 
   return {
     cards: [],
-    parsed: { dealerUp: null, playerCards: [], flat: [] },
+    parsed: { dealerUp: null, playerCards: [], dealerHoleCards: [], flat: [] },
     error: lastError.includes('Could not read')
       ? lastError
-      : `Only found ${best?.cards.length ?? 0} card(s). Frame the full dealer hand (5 cards) or all 4 hole cards and retry.`,
+      : context === 'dealer-rest'
+        ? `Only found ${best ? countDealerHoles(best.parsed, best.parsed.dealerUp) : 0}/4 dealer hole cards. Frame all 4 hole cards and retry.`
+        : `Only found ${best?.cards.length ?? 0} card(s). Frame the full dealer hand (5 cards) or all 4 hole cards and retry.`,
   }
 }
 

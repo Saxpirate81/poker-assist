@@ -3,7 +3,7 @@ import type { Card } from '../types/poker'
 import { recognizeCardsFromPhoto } from '../lib/aiService'
 import { compressImageForAi } from '../lib/imageUtils'
 import type { PhotoReadContext } from '../lib/geminiService'
-import { mapDetectedCardsToSlots, sanitizePhotoMapping } from '../lib/photoCardMapping'
+import { mapDetectedCardsToSlots, sanitizePhotoMapping, sanitizeShowdownMapping } from '../lib/photoCardMapping'
 import { getGeminiApiKey, getOpenAiApiKey } from '../lib/config'
 
 interface PhotoCaptureProps {
@@ -50,8 +50,11 @@ export function PhotoCapture({
         return
       }
       let mapping = mapDetectedCardsToSlots(result.parsed, slotIds, context, existingCards)
-      const { mapping: clean, warnings } = sanitizePhotoMapping(mapping, existingCards)
-      mapping = clean
+      const sanitized = context === 'dealer-rest'
+        ? sanitizeShowdownMapping(mapping, existingCards)
+        : sanitizePhotoMapping(mapping, existingCards)
+      mapping = sanitized.mapping
+      const warnings = sanitized.warnings
       const n = Object.keys(mapping).length
       if (n === 0) {
         setError(warnings[0] ?? 'No valid cards from photo — try again with clearer framing.')
@@ -71,18 +74,21 @@ export function PhotoCapture({
           return
         }
       }
-      if (context === 'dealer-rest') {
-        const holesFilled = ['d2', 'd3', 'd4', 'd5'].filter(id => mergedDealer[id]).length
-        if (holesFilled < 4) {
-          setError(`Only ${holesFilled}/4 dealer hole cards — include full dealer row in photo.`)
-          return
-        }
-      }
       if (context === 'player-hand' && playerMapped < 3) {
         setError(`Only mapped ${playerMapped}/5 player cards — include full hand in photo.`)
         return
       }
-      onCardsDetected(mapping)
+      if (context === 'dealer-rest') {
+        const holesFilled = ['d2', 'd3', 'd4', 'd5'].filter(id => mergedDealer[id]).length
+        onCardsDetected(mapping)
+        if (holesFilled < 4) {
+          const missing = ['d2', 'd3', 'd4', 'd5'].filter(id => !mergedDealer[id]).join(', ')
+          setError(`Got ${holesFilled}/4 hole cards — tap ${missing.toUpperCase()} or retake photo closer.`)
+          return
+        }
+      } else {
+        onCardsDetected(mapping)
+      }
       setSuccess(
         `✓ ${n} card${n === 1 ? '' : 's'} loaded`
         + (playerMapped > 0 ? ` (${playerMapped} player)` : '')

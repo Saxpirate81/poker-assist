@@ -444,17 +444,19 @@ export async function recognizeCardsFromPhoto(
   if (!apiKey) {
     return {
       cards: [],
-      parsed: { dealerUp: null, playerCards: [], flat: [] },
+      parsed: { dealerUp: null, playerCards: [], dealerHoleCards: [], flat: [] },
       error: gemini.error ?? 'Add Gemini or OpenAI API key in Settings for photo read.',
     }
   }
 
-  const emptyParsed = { dealerUp: null, playerCards: [], flat: [] as Card[] }
+  const emptyParsed = { dealerUp: null, playerCards: [], dealerHoleCards: [] as Card[], flat: [] as Card[] }
 
   try {
     const promptText = context === 'table'
       ? `Caribbean Stud table photo. Return JSON: {"dealerUp":{"rank","suit"}|null,"playerCards":[5 cards left-to-right]}. Use T for ten. Include ALL 5 player cards.`
-      : context === 'player-hand'
+      : context === 'dealer-rest'
+        ? `Caribbean Stud showdown. Return JSON: {"dealerUp":{"rank","suit"},"dealerHoleCards":[exactly 4 hole cards, NOT the up-card]}. Use T for ten.`
+        : context === 'player-hand'
         ? `Find ${expectedCount} PLAYER cards only (not dealer), left to right. Return JSON array of ${expectedCount} cards. Use T for ten.`
         : `Identify ~${expectedCount} playing cards left-to-right. Return ONLY JSON array [{"rank","suit"}]. Use T for ten.`
 
