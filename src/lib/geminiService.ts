@@ -12,11 +12,11 @@ export interface PhotoReadOptions {
   knownDealerUp?: Card | null
 }
 
-/** Primary + fallbacks — 2.0 models retired; use 2.5 Flash family. */
+/** Primary + fallbacks — 1.5 retired; 2.5 Flash first, 2.0 last resort. */
 const GEMINI_MODELS = [
   'gemini-2.5-flash',
   'gemini-2.5-flash-lite',
-  'gemini-1.5-flash',
+  'gemini-2.0-flash',
 ] as const
 
 function geminiUrl(model: string, apiKey: string): string {
@@ -94,7 +94,7 @@ async function tryGeminiModels(
   for (const model of GEMINI_MODELS) {
     const result = await callGeminiVision(apiKey, model, prompt, base64Data, mime, context)
     if (result.error && result.cards.length === 0) {
-      lastError = result.error
+      lastError = mergeVisionErrors(lastError, result.error)
       if (result.error?.includes('API key') || result.error?.includes('403')) break
       if (shouldRetryAfterVisionFailure(result.status, result.error)) continue
       break
@@ -115,7 +115,7 @@ async function tryGeminiModels(
       best = { cards: result.cards, parsed: result.parsed, holeCount }
     }
 
-    if (result.error) lastError = result.error
+    if (result.error) lastError = mergeVisionErrors(lastError, result.error)
     if (result.error?.includes('API key') || result.error?.includes('403')) break
     if (shouldRetryAfterVisionFailure(result.status, result.error)) continue
     if (!shouldTryNextModel(result.status, result.error)) break
@@ -123,6 +123,55 @@ async function tryGeminiModels(
 
   if (best) return { cards: best.cards, parsed: best.parsed, status: 200, holeCount: best.holeCount, error: lastError }
   return { cards: [], parsed: { dealerUp: null, playerCards: [], dealerHoleCards: [], flat: [] }, error: lastError, status: 200, holeCount: 0 }
+}
+
+function isModelUnavailableError(error?: string): boolean {
+  if (!error) return false
+  const lower = error.toLowerCase()
+  return lower.includes('model unavailable')
+    || lower.includes('not found for api')
+    || lower.includes('is not supported')
+    || lower.includes('no longer available')
+}
+
+/** Prefer parse/actionable errors over dead-model fallback noise. */
+function mergeVisionErrors(current: string, next?: string): string {
+  if (!next) return current
+  if (current === 'Gemini vision failed') return next
+  if (isModelUnavailableError(next) && !isModelUnavailableError(current)) return current
+  if (!isModelUnavailableError(next)) return next
+  return current
+}
+
+function extractGeminiText(data: Record<string, unknown>): { text: string; error?: string } {
+  const feedback = data.promptFeedback as Record<string, unknown> | undefined
+  if (feedback?.blockReason) {
+    return { text: '', error: 'Photo blocked by safety filter — try a clearer, well-lit table shot.' }
+  }
+
+  const candidate = (data.candidates as unknown[] | undefined)?.[0] as Record<string, unknown> | undefined
+  if (!candidate) {
+    return { text: '', error: 'Empty response from Gemini — try again.' }
+  }
+
+  const parts = ((candidate.content as Record<string, unknown> | undefined)?.parts ?? []) as Array<Record<string, unknown>>
+  const answer: string[] = []
+  const other: string[] = []
+  for (const part of parts) {
+    const t = typeof part.text === 'string' ? part.text.trim() : ''
+    if (!t) continue
+    if (part.thought === true) other.push(t)
+    else answer.push(t)
+  }
+
+  const text = (answer.length > 0 ? answer : other).join('\n').trim()
+  if (text) return { text }
+
+  const finish = String(candidate.finishReason ?? '')
+  if (finish === 'SAFETY') {
+    return { text: '', error: 'Photo blocked by safety filter — try a clearer table shot.' }
+  }
+  return { text: '', error: 'Empty response from Gemini — try again with a clearer photo.' }
 }
 
 function parseGeminiError(status: number, body: string): string {
@@ -172,9 +221,12 @@ async function callGeminiGenerate(
     return { ok: false, text: '', status: res.status, error: parseGeminiError(res.status, errBody) }
   }
 
-  const data = await res.json()
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-  return { ok: true, text, status: res.status }
+  const data = await res.json() as Record<string, unknown>
+  const extracted = extractGeminiText(data)
+  if (extracted.error && !extracted.text) {
+    return { ok: false, text: '', status: 200, error: extracted.error }
+  }
+  return { ok: true, text: extracted.text, status: res.status }
 }
 
 async function callGeminiVision(
@@ -185,6 +237,14 @@ async function callGeminiVision(
   mime: string,
   context: PhotoReadContext
 ): Promise<{ cards: Card[]; parsed: ReturnType<typeof parseVisionResponse>; error?: string; status: number }> {
+  const generationConfig: Record<string, unknown> = {
+    temperature: 0.1,
+    maxOutputTokens: context === 'table' ? 1200 : 1000,
+  }
+  if (model.startsWith('gemini-2.5')) {
+    generationConfig.thinkingConfig = { thinkingBudget: 0 }
+  }
+
   const result = await callGeminiGenerate(apiKey, model, {
     contents: [{
       parts: [
@@ -192,10 +252,7 @@ async function callGeminiVision(
         { inline_data: { mime_type: mime, data: base64Data } },
       ],
     }],
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: context === 'table' ? 1200 : 1000,
-    },
+    generationConfig,
   })
 
   if (!result.ok) {
@@ -281,7 +338,7 @@ export async function recognizeCardsFromPhotoGemini(
   for (const model of GEMINI_MODELS) {
     const result = await callGeminiVision(apiKey, model, prompt, base64Data, mime, context)
     if (result.error && result.cards.length === 0) {
-      lastError = result.error
+      lastError = mergeVisionErrors(lastError, result.error)
       if (result.error?.includes('API key') || result.error?.includes('403')) break
       if (shouldRetryAfterVisionFailure(result.status, result.error)) continue
       break
@@ -309,7 +366,7 @@ export async function recognizeCardsFromPhotoGemini(
       }
     }
 
-    if (result.error) lastError = result.error
+    if (result.error) lastError = mergeVisionErrors(lastError, result.error)
     if (result.error?.includes('API key') || result.error?.includes('403')) break
     if (shouldRetryAfterVisionFailure(result.status, result.error)) continue
     if (total > 0) continue
