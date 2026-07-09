@@ -365,7 +365,7 @@ export function CaribbeanHandView({
                   <p className="text-center text-[10px] text-white/70 mb-1 truncate">
                     {dealerEval.label}
                     <span className={`ml-1 ${dealerQualifiesHand ? 'text-emerald-400' : 'text-amber-400/80'}`}>
-                      {dealerQualifiesHand ? '· Q ✓' : '· no Q'}
+                      {dealerQualifiesHand ? '· qualifies' : '· no qual'}
                     </span>
                   </p>
                 )}

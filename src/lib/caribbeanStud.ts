@@ -83,8 +83,12 @@ export function saveCaribbeanRules(rules: Record<string, number | boolean | stri
 
 export { shouldCaribbeanRaise, getRaiseReason } from './caribbeanFlow'
 
+/** Dealer qualifies with any pair-or-better, or Ace-King high (both A and K present). */
 export function dealerQualifies(cards: Card[]): boolean {
   if (cards.length !== 5) return false
+  const hand = evaluateHand(cards)
+  if (!hand) return false
+  if (hand.rank !== 'high_card') return true
   const values = cards.map(c => rankValue(c.rank))
   return values.includes(14) && values.includes(13)
 }
