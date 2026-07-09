@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { formatMoneyWithSymbol } from '../lib/money'
-import { OUTCOME_FILTER_KEY, OUTCOME_STYLE, formatHandTimestamp } from '../lib/handLogService'
-import type { OutcomeTimelineEvent } from '../types/handLog'
+import { OUTCOME_FILTER_KEY, OUTCOME_STYLE, formatHandTimestamp, strengthPct } from '../lib/handLogService'
+import type { OutcomeTimelineEvent, HandStrengthBlock, HandStrengthPoint } from '../types/handLog'
 
 interface MetricInfoTipProps {
   title: string
@@ -980,6 +980,235 @@ export function OutcomeTimeline({
 
       <p className="text-[9px] text-white/30 mt-2 text-center">
         Tap legend to filter · strip scrolls oldest (left) to newest (right)
+      </p>
+    </div>
+  )
+}
+
+function strengthWinnerLabel(p: HandStrengthPoint): string {
+  if (p.stronger === 'player') return 'You stronger'
+  if (p.stronger === 'dealer') return 'Dealer stronger'
+  if (p.stronger === 'tie') return 'Same strength'
+  return 'No dealer hand'
+}
+
+/** You vs dealer hand strength — paginated blocks of 10 hands. */
+export function HandStrengthTimeline({
+  blocks,
+  blockSize = 10,
+}: {
+  blocks: HandStrengthBlock[]
+  blockSize?: number
+}) {
+  const [blockIndex, setBlockIndex] = useState(() => Math.max(0, blocks.length - 1))
+  const [activeId, setActiveId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setBlockIndex(Math.max(0, blocks.length - 1))
+  }, [blocks.length])
+
+  if (blocks.length === 0) {
+    return <p className="text-xs text-white/40 text-center py-6">Log hands with your 5 cards to see strength trends</p>
+  }
+
+  const block = blocks[Math.min(blockIndex, blocks.length - 1)]!
+  const active = activeId ? block.hands.find(h => h.handId === activeId) : null
+  const maxScoreInBlock = Math.max(
+    ...block.hands.flatMap(h => [h.playerScore, h.dealerScore ?? 0]),
+    1
+  )
+
+  const dateRange = (() => {
+    try {
+      const a = new Date(block.dateStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      const b = new Date(block.dateEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      return a === b ? a : `${a} – ${b}`
+    } catch {
+      return ''
+    }
+  })()
+
+  return (
+    <div className="w-full touch-manipulation">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <button
+          type="button"
+          disabled={blockIndex <= 0}
+          onClick={() => setBlockIndex(i => Math.max(0, i - 1))}
+          className="w-8 h-8 rounded-lg bg-white/10 text-white/70 disabled:opacity-30 font-bold"
+          aria-label="Older 10 hands"
+        >
+          ‹
+        </button>
+        <div className="text-center flex-1 min-w-0">
+          <p className="text-xs font-bold text-gold truncate">
+            Hands {block.startHand}–{block.endHand}
+          </p>
+          <p className="text-[9px] text-white/40">
+            Set {blockIndex + 1} of {blocks.length} · {blockSize} per page{dateRange ? ` · ${dateRange}` : ''}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={blockIndex >= blocks.length - 1}
+          onClick={() => setBlockIndex(i => Math.min(blocks.length - 1, i + 1))}
+          className="w-8 h-8 rounded-lg bg-white/10 text-white/70 disabled:opacity-30 font-bold"
+          aria-label="Newer 10 hands"
+        >
+          ›
+        </button>
+      </div>
+
+      <div className="grid grid-cols-4 gap-1 mb-2 text-center text-[9px]">
+        <div className="rounded-lg bg-emerald-950/40 border border-emerald-500/20 py-1.5">
+          <p className="font-bold text-emerald-400">{block.playerStrongerCount}</p>
+          <p className="text-white/40">You stronger</p>
+        </div>
+        <div className="rounded-lg bg-red-950/40 border border-red-500/20 py-1.5">
+          <p className="font-bold text-red-400">{block.dealerStrongerCount}</p>
+          <p className="text-white/40">Dealer stronger</p>
+        </div>
+        <div className="rounded-lg bg-white/5 border border-white/10 py-1.5">
+          <p className="font-bold text-white/70">{block.tieCount}</p>
+          <p className="text-white/40">Tied</p>
+        </div>
+        <div className="rounded-lg bg-white/5 border border-white/10 py-1.5">
+          <p className={`font-bold ${block.blockPnL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {formatPnLShort(block.blockPnL)}
+          </p>
+          <p className="text-white/40">Block P&amp;L</p>
+        </div>
+      </div>
+
+      {block.avgDealerScore != null && (
+        <div className="mb-3 rounded-lg bg-black/30 border border-white/10 p-2">
+          <p className="text-[9px] text-white/40 mb-1.5 text-center">Average strength this set (showdown hands)</p>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] text-emerald-400/90 w-8 shrink-0">You</span>
+              <div className="flex-1 h-2.5 rounded-full bg-white/5 overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500/80 rounded-full"
+                  style={{ width: `${strengthPct(block.avgPlayerScore)}%` }}
+                />
+              </div>
+              <span className="text-[9px] text-white/50 w-10 text-right shrink-0">{Math.round(block.avgPlayerScore)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] text-red-400/90 w-8 shrink-0">Dlr</span>
+              <div className="flex-1 h-2.5 rounded-full bg-white/5 overflow-hidden">
+                <div
+                  className="h-full bg-red-400/80 rounded-full"
+                  style={{ width: `${strengthPct(block.avgDealerScore)}%` }}
+                />
+              </div>
+              <span className="text-[9px] text-white/50 w-10 text-right shrink-0">{Math.round(block.avgDealerScore)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-lg bg-black/20 border border-white/10 p-2 mb-2">
+        <div className="flex justify-between text-[8px] text-white/40 mb-1 px-0.5">
+          <span className="text-emerald-400/80">You</span>
+          <span className="text-red-400/80">Dealer</span>
+        </div>
+        <div className="flex items-end justify-between gap-0.5" style={{ height: 72 }}>
+          {block.hands.map(h => {
+            const playerH = (h.playerScore / maxScoreInBlock) * 100
+            const dealerH = h.dealerScore != null ? (h.dealerScore / maxScoreInBlock) * 100 : 0
+            const isActive = activeId === h.handId
+            return (
+              <button
+                key={h.handId}
+                type="button"
+                onClick={() => setActiveId(prev => (prev === h.handId ? null : h.handId))}
+                className={`flex-1 min-w-0 flex flex-col items-center justify-end h-full gap-0.5 p-0 border-0 bg-transparent ${
+                  isActive ? 'opacity-100' : 'opacity-90 hover:opacity-100'
+                }`}
+                aria-label={`Hand ${h.handNum}: ${strengthWinnerLabel(h)}`}
+              >
+                <div className="flex items-end justify-center gap-px w-full h-14">
+                  <div
+                    className={`w-[42%] rounded-t-sm bg-emerald-500/75 ${isActive ? 'ring-1 ring-gold/50' : ''}`}
+                    style={{ height: `${Math.max(8, playerH)}%` }}
+                  />
+                  <div
+                    className={`w-[42%] rounded-t-sm ${h.dealerScore != null ? 'bg-red-400/75' : 'bg-white/15 border border-dashed border-white/20'}`}
+                    style={{ height: `${Math.max(h.dealerScore != null ? 8 : 12, dealerH)}%` }}
+                  />
+                </div>
+                <span className="text-[7px] text-white/45 leading-none">{h.handNum}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <ul className="max-h-40 overflow-y-auto rounded-lg bg-black/20 border border-white/5 divide-y divide-white/5">
+        {[...block.hands].reverse().map(h => (
+          <li key={h.handId}>
+            <button
+              type="button"
+              onClick={() => setActiveId(prev => (prev === h.handId ? null : h.handId))}
+              className={`w-full flex items-start gap-2 py-2 px-2 text-left ${activeId === h.handId ? 'bg-gold/10' : 'hover:bg-white/5'}`}
+            >
+              <span className="text-[10px] text-white/40 w-8 shrink-0 pt-0.5">#{h.handNum}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-emerald-400/90 truncate">{h.playerLabel}</p>
+                <p className="text-[10px] text-red-400/80 truncate">
+                  {h.dealerLabel ?? (h.action === 'fold' ? 'Fold — dealer not shown' : 'Dealer incomplete')}
+                </p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className={`text-[9px] font-semibold ${
+                  h.stronger === 'player' ? 'text-emerald-400' : h.stronger === 'dealer' ? 'text-red-400' : 'text-white/40'
+                }`}>
+                  {h.stronger === 'player' ? 'You +' : h.stronger === 'dealer' ? 'Dlr +' : h.stronger === 'tie' ? 'Tie' : '—'}
+                </p>
+                <p className={`text-[10px] font-bold ${h.netResult >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {formatPnLShort(h.netResult)}
+                </p>
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      {active && (
+        <div className="mt-2 rounded-lg bg-slate-800/95 border border-gold/25 px-3 py-2 relative">
+          <button
+            type="button"
+            onClick={() => setActiveId(null)}
+            className="absolute top-1.5 right-2 text-white/30 hover:text-white text-sm"
+            aria-label="Close"
+          >
+            ×
+          </button>
+          <p className="text-[10px] text-white/45 pr-6">
+            Hand {active.handNum} · {formatHandTimestamp(active.createdAt)}
+          </p>
+          <p className="text-sm font-bold mt-0.5 text-gold">{strengthWinnerLabel(active)}</p>
+          <div className="grid grid-cols-2 gap-2 mt-1 text-[10px]">
+            <div>
+              <p className="text-emerald-400/80">You · {active.playerScore}</p>
+              <p className="text-white/60 truncate">{active.playerLabel}</p>
+            </div>
+            <div>
+              <p className="text-red-400/80">
+                Dealer · {active.dealerScore != null ? active.dealerScore : '—'}
+              </p>
+              <p className="text-white/60 truncate">{active.dealerLabel ?? 'Not logged'}</p>
+            </div>
+          </div>
+          <p className={`text-sm font-bold mt-1 ${active.netResult >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {formatPnLShort(active.netResult)} · {active.action}
+          </p>
+        </div>
+      )}
+
+      <p className="text-[9px] text-white/30 mt-2 text-center">
+        ‹ › = older / newer sets of {blockSize} · green = you · red = dealer · dashed = no full dealer hand
       </p>
     </div>
   )

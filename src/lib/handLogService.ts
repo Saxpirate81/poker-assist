@@ -1,8 +1,9 @@
 import type { AiAdvice, Card } from '../types/poker'
-import type { HandTrends, LoggedCaribbeanHand, DealerStats, BetOutcomeBreakdown, BetOutcomeSlice, OutcomeTimelineEvent, HandOutcomeType } from '../types/handLog'
+import type { HandTrends, LoggedCaribbeanHand, DealerStats, BetOutcomeBreakdown, BetOutcomeSlice, OutcomeTimelineEvent, HandOutcomeType, HandStrengthPoint, HandStrengthBlock } from '../types/handLog'
 import type { CaribbeanSession } from './caribbeanStud'
 import { getDisplayBankroll } from './bankrollConfig'
 import { shouldCaribbeanRaise } from './caribbeanFlow'
+import { evaluateHand } from './pokerEval'
 import { getDeviceId, isSupabaseConfigured } from './config'
 import { getSupabase } from './supabase'
 import { formatCardsShort } from './caribbeanStud'
@@ -521,6 +522,84 @@ export function buildOutcomeTimeline(hands: LoggedCaribbeanHand[]): OutcomeTimel
 export function formatShowdownStreak(streak: string): string {
   if (!streak || streak === '—') return streak
   return streak.split('').join(' ')
+}
+
+const MAX_HAND_SCORE = 900
+
+function compareStrength(playerScore: number, dealerScore: number): 'player' | 'dealer' | 'tie' {
+  if (playerScore > dealerScore) return 'player'
+  if (playerScore < dealerScore) return 'dealer'
+  return 'tie'
+}
+
+function scoreLoggedHand(h: LoggedCaribbeanHand, handNum: number): HandStrengthPoint {
+  const playerEval = h.playerCards.length === 5 ? evaluateHand(h.playerCards) : null
+  const dealerEval = h.dealerCards.length >= 5 ? evaluateHand(h.dealerCards.slice(0, 5)) : null
+  const dealerComplete = h.dealerCards.length >= 5
+
+  let stronger: HandStrengthPoint['stronger'] = 'unknown'
+  if (playerEval && dealerEval) {
+    stronger = compareStrength(playerEval.score, dealerEval.score)
+  }
+
+  return {
+    handNum,
+    handId: h.id,
+    createdAt: h.createdAt,
+    action: h.action,
+    playerScore: playerEval?.score ?? 0,
+    playerLabel: playerEval?.label ?? (h.playerHand || '—'),
+    dealerScore: dealerEval?.score ?? null,
+    dealerLabel: dealerEval?.label ?? (dealerComplete ? h.dealerHand : null),
+    dealerComplete,
+    stronger,
+    netResult: h.netResult,
+  }
+}
+
+/** Group chronological hands into blocks (default 10) with you vs dealer strength stats. */
+export function buildHandStrengthBlocks(
+  hands: LoggedCaribbeanHand[],
+  blockSize = 10
+): HandStrengthBlock[] {
+  if (hands.length === 0) return []
+
+  const chrono = [...hands].reverse()
+  const points = chrono.map((h, i) => scoreLoggedHand(h, i + 1))
+  const blocks: HandStrengthBlock[] = []
+
+  for (let i = 0; i < points.length; i += blockSize) {
+    const slice = points.slice(i, i + blockSize)
+    const comparable = slice.filter(p => p.dealerComplete && p.playerScore > 0)
+    const avgPlayerScore = slice.length
+      ? slice.reduce((s, p) => s + p.playerScore, 0) / slice.length
+      : 0
+    const avgDealerScore = comparable.length
+      ? comparable.reduce((s, p) => s + (p.dealerScore ?? 0), 0) / comparable.length
+      : null
+
+    blocks.push({
+      blockIndex: blocks.length,
+      startHand: slice[0]!.handNum,
+      endHand: slice[slice.length - 1]!.handNum,
+      hands: slice,
+      avgPlayerScore,
+      avgDealerScore,
+      playerStrongerCount: slice.filter(p => p.stronger === 'player').length,
+      dealerStrongerCount: slice.filter(p => p.stronger === 'dealer').length,
+      tieCount: slice.filter(p => p.stronger === 'tie').length,
+      unknownCount: slice.filter(p => p.stronger === 'unknown').length,
+      blockPnL: slice.reduce((s, p) => s + p.netResult, 0),
+      dateStart: slice[0]!.createdAt,
+      dateEnd: slice[slice.length - 1]!.createdAt,
+    })
+  }
+
+  return blocks
+}
+
+export function strengthPct(score: number): number {
+  return Math.min(100, Math.max(4, (score / MAX_HAND_SCORE) * 100))
 }
 
 const EMPTY_TRENDS: HandTrends = {

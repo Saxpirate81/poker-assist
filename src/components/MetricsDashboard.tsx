@@ -12,8 +12,8 @@ import {
 import { formatHandLine, formatHandTimestamp, formatShowdownStreak } from '../lib/handLogService'
 import { formatMoneyWithSymbol } from '../lib/money'
 import { POKER_GAMES } from '../data/games'
-import { LineChart, BarChart, RateBar, MetricInfoTip, ToggleBreakdownChart, OutcomeTimeline } from './MetricCharts'
-import { computeBetOutcomeBreakdown, buildOutcomeTimeline } from '../lib/handLogService'
+import { LineChart, BarChart, RateBar, MetricInfoTip, ToggleBreakdownChart, OutcomeTimeline, HandStrengthTimeline } from './MetricCharts'
+import { computeBetOutcomeBreakdown, buildOutcomeTimeline, buildHandStrengthBlocks } from '../lib/handLogService'
 import {
   getActualBankroll,
   getStartingBankroll,
@@ -77,6 +77,10 @@ const METRIC_HELP: Record<string, { title: string; body: string }> = {
   outcomeTimeline: {
     title: 'Outcome timeline',
     body: 'Every hand in order — color-coded by outcome. Strip view scrolls left (oldest) to right (newest). Timeline list groups by date. Tap legend pills to filter (synced with the donut chart above).',
+  },
+  handStrength: {
+    title: 'Hand strength — you vs dealer',
+    body: 'Compares evaluated hand strength (pair beats high card, etc.) for your 5 cards vs the dealer\'s 5 when logged. Grouped in sets of 10 hands — use ‹ › to move between sets. Folds without a full dealer hand show dashed dealer bars.',
   },
 }
 
@@ -381,6 +385,7 @@ function CaribbeanDetail({
   ]
   const betOutcome = computeBetOutcomeBreakdown(hands)
   const outcomeTimeline = buildOutcomeTimeline(hands)
+  const strengthBlocks = buildHandStrengthBlocks(hands, 10)
 
   return (
     <>
@@ -540,6 +545,16 @@ function CaribbeanDetail({
               title={`${outcomeTimeline.length} hands · oldest ← → newest`}
             />
           </div>
+        </div>
+      )}
+
+      {strengthBlocks.length > 0 && (
+        <div className="rounded-xl bg-black/30 border border-white/10 p-3 mb-3">
+          <p className="text-[10px] uppercase text-gold mb-2 flex items-center">
+            You vs dealer strength
+            <MetricInfoTip {...METRIC_HELP.handStrength!} />
+          </p>
+          <HandStrengthTimeline blocks={strengthBlocks} blockSize={10} />
         </div>
       )}
 

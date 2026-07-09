@@ -113,3 +113,36 @@ export interface OutcomeTimelineEvent {
   action: 'raise' | 'fold'
   outcomeSummary: string
 }
+
+/** Per-hand strength comparison (oldest → newest numbering). */
+export interface HandStrengthPoint {
+  handNum: number
+  handId: string
+  createdAt: string
+  action: 'raise' | 'fold'
+  playerScore: number
+  playerLabel: string
+  dealerScore: number | null
+  dealerLabel: string | null
+  /** Dealer had all 5 cards logged */
+  dealerComplete: boolean
+  stronger: 'player' | 'dealer' | 'tie' | 'unknown'
+  netResult: number
+}
+
+/** Timeline block — default 10 hands per set. */
+export interface HandStrengthBlock {
+  blockIndex: number
+  startHand: number
+  endHand: number
+  hands: HandStrengthPoint[]
+  avgPlayerScore: number
+  avgDealerScore: number | null
+  playerStrongerCount: number
+  dealerStrongerCount: number
+  tieCount: number
+  unknownCount: number
+  blockPnL: number
+  dateStart: string
+  dateEnd: string
+}
