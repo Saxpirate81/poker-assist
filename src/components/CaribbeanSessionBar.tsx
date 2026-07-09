@@ -1,4 +1,6 @@
 import type { CaribbeanSession } from '../lib/caribbeanStud'
+import { getDisplayBankroll } from '../lib/bankrollConfig'
+import { formatMoneyWithSymbol } from '../lib/money'
 
 interface CaribbeanSessionBarProps {
   session: CaribbeanSession
@@ -10,12 +12,14 @@ export function CaribbeanSessionBar({ session, onAdjustBankroll, compact }: Cari
   const pnlColor = session.netPnL >= 0 ? 'text-emerald-400' : 'text-red-400'
   const pnlSign = session.netPnL >= 0 ? '+' : ''
 
+  const stack = getDisplayBankroll(session.netPnL)
+
   return (
     <div className={`rounded-lg border border-white/10 bg-black/30 flex items-center justify-between gap-2 text-[10px] ${compact ? 'px-2 py-1 mb-1' : 'px-3 py-2 mb-3 text-xs'}`}>
       <div className="flex items-center gap-3">
         <div>
           <span className="text-white/40">Stack </span>
-          <span className="font-bold text-gold">${session.bankroll}</span>
+          <span className="font-bold text-gold">{formatMoneyWithSymbol(stack)}</span>
         </div>
         <div className="text-white/30">|</div>
         <div>

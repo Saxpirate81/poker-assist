@@ -1,15 +1,19 @@
 import type { GameRuleSetting } from '../types/poker'
 import type { PokerGame } from '../types/poker'
+import type { GameRulesKnowledge } from '../types/gameRulesKnowledge'
+import { TableRulesPanel } from './TableRulesPanel'
 
 interface GameRulesProps {
   game: PokerGame
   rules: GameRuleSetting[]
+  rulesKnowledge: GameRulesKnowledge
   onChange: (rules: GameRuleSetting[]) => void
+  onKnowledgeChange: (knowledge: GameRulesKnowledge) => void
   onStart: () => void
   onBack: () => void
 }
 
-export function GameRules({ game, rules, onChange, onStart, onBack }: GameRulesProps) {
+export function GameRules({ game, rules, rulesKnowledge, onChange, onKnowledgeChange, onStart, onBack }: GameRulesProps) {
   const updateRule = (id: string, value: number | boolean | string) => {
     onChange(rules.map(r => r.id === id ? { ...r, value } : r))
   }
@@ -26,17 +30,13 @@ export function GameRules({ game, rules, onChange, onStart, onBack }: GameRulesP
         <p className="text-white/60 text-sm mt-1">{game.description}</p>
       </header>
 
-      <section className="mb-6">
-        <h2 className="text-xs uppercase tracking-wider text-gold mb-3">How to play</h2>
-        <ul className="space-y-2">
-          {game.rulesSummary.map((rule, i) => (
-            <li key={i} className="flex gap-2 text-sm text-white/80">
-              <span className="text-gold shrink-0">{i + 1}.</span>
-              {rule}
-            </li>
-          ))}
-        </ul>
-      </section>
+      <TableRulesPanel
+        game={game}
+        rules={rules}
+        knowledge={rulesKnowledge}
+        onKnowledgeChange={onKnowledgeChange}
+        onRulesChange={onChange}
+      />
 
       <section className="mb-6">
         <h2 className="text-xs uppercase tracking-wider text-gold mb-3">Tweak rules</h2>
@@ -77,17 +77,6 @@ export function GameRules({ game, rules, onChange, onStart, onBack }: GameRulesP
                 </select>
               )}
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mb-8">
-        <h2 className="text-xs uppercase tracking-wider text-gold mb-3">Strategy tips</h2>
-        <div className="flex flex-wrap gap-2">
-          {game.strategyTips.map((tip, i) => (
-            <span key={i} className="text-xs px-3 py-1.5 rounded-full bg-emerald-900/40 border border-emerald-500/20 text-emerald-200">
-              {tip}
-            </span>
           ))}
         </div>
       </section>

@@ -301,3 +301,21 @@ export function meetsThreeCardPlayThreshold(cards: Card[]): boolean {
   }
   return false
 }
+
+/** Best 5-card Omaha hand — exactly 2 hole + 3 from board (3–5 board cards). */
+export function evaluateOmahaBestHand(holeCards: Card[], board: Card[]): EvaluatedHand | null {
+  if (holeCards.length !== 4 || board.length < 3) return null
+  let best: EvaluatedHand | null = null
+  const holePairs = combinations(holeCards, 2)
+  const boardTrips = combinations(board, 3)
+  for (const h of holePairs) {
+    for (const b of boardTrips) {
+      const scored = scoreFive([...h, ...b])
+      if (!best || scored.score > best.score ||
+        (scored.score === best.score && compareTiebreakers(scored.tiebreakers, best.tiebreakers) > 0)) {
+        best = scored
+      }
+    }
+  }
+  return best
+}

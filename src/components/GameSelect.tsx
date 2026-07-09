@@ -1,5 +1,7 @@
 import type { PokerGame } from '../types/poker'
+import { useState } from 'react'
 import { HomeStatsCard } from './HomeStatsCard'
+import { MetricsDashboard } from './MetricsDashboard'
 import { POKER_GAMES } from '../data/games'
 
 interface GameSelectProps {
@@ -8,10 +10,19 @@ interface GameSelectProps {
 }
 
 export function GameSelect({ onSelect, onQuickStartCaribbean }: GameSelectProps) {
+  const [showMetrics, setShowMetrics] = useState(false)
+  const [statsRefresh, setStatsRefresh] = useState(0)
   const otherGames = POKER_GAMES.filter(g => g.id !== 'caribbean-stud')
 
+  const closeMetrics = () => {
+    setShowMetrics(false)
+    setStatsRefresh(k => k + 1)
+  }
+
   return (
-    <div className="max-w-lg mx-auto px-4 py-8">
+    <>
+      {showMetrics && <MetricsDashboard onClose={closeMetrics} />}
+      <div className="max-w-lg mx-auto px-4 py-8">
       <header className="text-center mb-8">
         <div className="text-5xl mb-3">🃏</div>
         <h1 className="text-3xl font-bold tracking-tight">Poker Assist</h1>
@@ -35,7 +46,7 @@ export function GameSelect({ onSelect, onQuickStartCaribbean }: GameSelectProps)
         </div>
       </button>
 
-      <HomeStatsCard />
+      <HomeStatsCard onOpenMetrics={() => setShowMetrics(true)} refreshKey={statsRefresh} />
 
       <p className="text-xs text-white/40 uppercase tracking-wider mb-3">Other games</p>
       <div className="grid gap-3">
@@ -57,6 +68,7 @@ export function GameSelect({ onSelect, onQuickStartCaribbean }: GameSelectProps)
           </button>
         ))}
       </div>
-    </div>
+      </div>
+    </>
   )
 }

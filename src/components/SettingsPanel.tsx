@@ -14,6 +14,13 @@ import {
 } from '../lib/config'
 import { resetSupabaseClient } from '../lib/supabase'
 import { testGeminiConnection } from '../lib/geminiService'
+import { HandStorageDiagnostic } from './HandStorageDiagnostic'
+import {
+  getActualBankroll,
+  getStartingBankroll,
+  setActualBankroll,
+  setStartingBankroll,
+} from '../lib/bankrollConfig'
 
 interface SettingsPanelProps {
   onClose: () => void
@@ -28,6 +35,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [saved, setSaved] = useState(false)
   const [testResult, setTestResult] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
+  const [actualBankroll, setActualBankrollDraft] = useState(() => {
+    const v = getActualBankroll()
+    return v !== null ? String(v) : ''
+  })
+  const [startingBankroll, setStartingDraft] = useState(() => String(getStartingBankroll()))
 
   const handleSave = () => {
     setGeminiApiKey(geminiKey.trim())
@@ -105,6 +117,43 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         </div>
 
         <hr className="border-white/10 my-4" />
+
+        <p className="text-xs uppercase tracking-wider text-gold mb-3">Bankroll</p>
+        <p className="text-xs text-white/50 mb-3">Set your real casino balance so metrics don&apos;t show the old $500 default.</p>
+        <div className="mb-3">
+          <label className="text-xs text-white/50 block mb-1">Current balance ($)</label>
+          <input
+            type="number"
+            step="0.01"
+            value={actualBankroll}
+            onChange={e => setActualBankrollDraft(e.target.value)}
+            onBlur={() => {
+              const n = Number(actualBankroll)
+              if (actualBankroll.trim() === '') setActualBankroll(null)
+              else if (Number.isFinite(n) && n >= 0) setActualBankroll(n)
+            }}
+            placeholder="e.g. 70.51"
+            className="w-full px-3 py-2 rounded-lg bg-black/30 border border-white/10 text-white text-sm"
+          />
+        </div>
+        <div className="mb-4">
+          <label className="text-xs text-white/50 block mb-1">Starting stack ($)</label>
+          <input
+            type="number"
+            step="0.01"
+            value={startingBankroll}
+            onChange={e => setStartingDraft(e.target.value)}
+            onBlur={() => {
+              const n = Number(startingBankroll)
+              if (Number.isFinite(n) && n >= 0) setStartingBankroll(n)
+            }}
+            placeholder="0"
+            className="w-full px-3 py-2 rounded-lg bg-black/30 border border-white/10 text-white text-sm"
+          />
+          <p className="text-[10px] text-white/40 mt-1">Used when current balance is blank: starting + logged P&amp;L.</p>
+        </div>
+
+        <HandStorageDiagnostic />
 
         <p className="text-xs uppercase tracking-wider text-gold mb-3">Supabase (hand history cloud sync)</p>
         <p className="text-xs text-white/50 mb-3">Use the same Supabase project as your other apps. Run the SQL migration in supabase/migrations/</p>

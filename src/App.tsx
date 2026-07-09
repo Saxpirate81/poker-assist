@@ -1,15 +1,34 @@
 import { useState, useCallback, useEffect } from 'react'
 import type { Card, GameRuleSetting, HandState } from './types/poker'
 import type { PokerGame } from './types/poker'
+import type { GameRulesKnowledge } from './types/gameRulesKnowledge'
 import { getGameById } from './data/games'
 import { GameSelect } from './components/GameSelect'
 import { GameRules } from './components/GameRules'
 import { HandBoard } from './components/HandBoard'
 import { CaribbeanHandView } from './components/CaribbeanHandView'
+import { ThreeCardHandView } from './components/ThreeCardHandView'
+import { VideoPokerHandView } from './components/VideoPokerHandView'
+import { HoldemHandView, OmahaHandView } from './components/StreetHandView'
 import { SettingsPanel } from './components/SettingsPanel'
 import { loadCaribbeanRules, saveCaribbeanRules } from './lib/caribbeanStud'
+import {
+  applyKnowledgeToRuleSettings,
+  loadGameRulesKnowledge,
+  saveGameRulesKnowledge,
+  syncRulesKnowledgeFromCloud,
+} from './lib/rulesService'
+import { loadAdjustments } from './lib/metricsService'
 
 type Screen = 'select' | 'rules' | 'hand'
+
+const DEDICATED_HAND_GAMES = new Set([
+  'caribbean-stud',
+  'three-card-poker',
+  'video-poker',
+  'texas-holdem',
+  'omaha',
+])
 
 function createInitialHand(game: PokerGame): HandState {
   const allSlots = [
@@ -28,7 +47,7 @@ function createInitialHand(game: PokerGame): HandState {
     pot: 0,
     playerBet: 0,
     dealerBet: 0,
-    bankroll: 500,
+    bankroll: 0,
     history: [],
   }
 }
@@ -37,18 +56,31 @@ function App() {
   const [screen, setScreen] = useState<Screen>('select')
   const [game, setGame] = useState<PokerGame | null>(null)
   const [rules, setRules] = useState<GameRuleSetting[]>([])
+  const [rulesKnowledge, setRulesKnowledge] = useState<GameRulesKnowledge | null>(null)
   const [handState, setHandState] = useState<HandState | null>(null)
   const [showSettings, setShowSettings] = useState(false)
 
-  const selectGame = (g: PokerGame, skipRules = false) => {
+  const selectGame = async (g: PokerGame, skipRules = false) => {
     setGame(g)
+    let knowledge = loadGameRulesKnowledge(g)
+    const cloud = await syncRulesKnowledgeFromCloud(g)
+    if (cloud) knowledge = cloud
+
     const saved = g.id === 'caribbean-stud' ? loadCaribbeanRules() : null
-    const baseRules = g.defaultRules.map(r => ({ ...r }))
+    let baseRules = g.defaultRules.map(r => ({ ...r }))
+    baseRules = applyKnowledgeToRuleSettings(baseRules, knowledge)
     if (saved) {
-      setRules(baseRules.map(r => ({ ...r, value: saved[r.id] ?? r.value })))
-    } else {
-      setRules(baseRules)
+      baseRules = baseRules.map(r => ({ ...r, value: saved[r.id] ?? r.value }))
     }
+    const metricAdj = loadAdjustments(g.id)
+    if (Object.keys(metricAdj.userOverrides).length > 0) {
+      baseRules = baseRules.map(r => ({
+        ...r,
+        value: metricAdj.userOverrides[r.id] ?? r.value,
+      }))
+    }
+    setRulesKnowledge(knowledge)
+    setRules(baseRules)
     if (skipRules || g.id === 'caribbean-stud') {
       setHandState(createInitialHand(g))
       setScreen('hand')
@@ -61,6 +93,10 @@ function App() {
     const g = getGameById('caribbean-stud')
     if (g) selectGame(g, true)
   }
+
+  useEffect(() => {
+    if (rulesKnowledge) saveGameRulesKnowledge(rulesKnowledge)
+  }, [rulesKnowledge])
 
   useEffect(() => {
     if (game?.id === 'caribbean-stud') {
@@ -81,11 +117,11 @@ function App() {
     setHandState(createInitialHand(game))
   }, [game])
 
-  const isCaribbeanHand = screen === 'hand' && game?.id === 'caribbean-stud'
+  const isDedicatedHand = screen === 'hand' && game != null && DEDICATED_HAND_GAMES.has(game.id)
 
   return (
     <div className="app-shell relative">
-      {!isCaribbeanHand && (
+      {!isDedicatedHand && (
         <button
           type="button"
           onClick={() => setShowSettings(true)}
@@ -100,21 +136,39 @@ function App() {
         <GameSelect onSelect={g => selectGame(g, false)} onQuickStartCaribbean={quickStartCaribbean} />
       )}
 
-      {screen === 'rules' && game && (
+      {screen === 'rules' && game && rulesKnowledge && (
         <GameRules
           game={game}
           rules={rules}
+          rulesKnowledge={rulesKnowledge}
           onChange={setRules}
+          onKnowledgeChange={setRulesKnowledge}
           onStart={startHand}
           onBack={() => setScreen('select')}
         />
       )}
 
-      {screen === 'hand' && game && handState && game.id === 'caribbean-stud' && (
+      {screen === 'hand' && game && handState && rulesKnowledge && game.id === 'caribbean-stud' && (
         <CaribbeanHandView
           game={game}
           state={handState}
           rules={rules}
+          rulesKnowledge={rulesKnowledge}
+          onUpdateCards={cards => setHandState(prev => prev ? { ...prev, cards } : prev)}
+          onUpdateRules={setRules}
+          onKnowledgeChange={setRulesKnowledge}
+          onNewHand={newHand}
+          onBack={() => setScreen('select')}
+          onOpenSettings={() => setShowSettings(true)}
+        />
+      )}
+
+      {screen === 'hand' && game && handState && rulesKnowledge && game.id === 'three-card-poker' && (
+        <ThreeCardHandView
+          game={game}
+          state={handState}
+          rules={rules}
+          rulesKnowledge={rulesKnowledge}
           onUpdateCards={cards => setHandState(prev => prev ? { ...prev, cards } : prev)}
           onUpdateRules={setRules}
           onNewHand={newHand}
@@ -123,7 +177,49 @@ function App() {
         />
       )}
 
-      {screen === 'hand' && game && handState && game.id !== 'caribbean-stud' && (
+      {screen === 'hand' && game && handState && rulesKnowledge && game.id === 'video-poker' && (
+        <VideoPokerHandView
+          game={game}
+          state={handState}
+          rules={rules}
+          rulesKnowledge={rulesKnowledge}
+          onUpdateCards={cards => setHandState(prev => prev ? { ...prev, cards } : prev)}
+          onUpdateRules={setRules}
+          onNewHand={newHand}
+          onBack={() => setScreen('select')}
+          onOpenSettings={() => setShowSettings(true)}
+        />
+      )}
+
+      {screen === 'hand' && game && handState && rulesKnowledge && game.id === 'texas-holdem' && (
+        <HoldemHandView
+          game={game}
+          state={handState}
+          rules={rules}
+          rulesKnowledge={rulesKnowledge}
+          onUpdateCards={cards => setHandState(prev => prev ? { ...prev, cards } : prev)}
+          onUpdateRound={(round, roundIndex) => setHandState(prev => prev ? { ...prev, currentRound: round, roundIndex } : prev)}
+          onNewHand={newHand}
+          onBack={() => setScreen('select')}
+          onOpenSettings={() => setShowSettings(true)}
+        />
+      )}
+
+      {screen === 'hand' && game && handState && rulesKnowledge && game.id === 'omaha' && (
+        <OmahaHandView
+          game={game}
+          state={handState}
+          rules={rules}
+          rulesKnowledge={rulesKnowledge}
+          onUpdateCards={cards => setHandState(prev => prev ? { ...prev, cards } : prev)}
+          onUpdateRound={(round, roundIndex) => setHandState(prev => prev ? { ...prev, currentRound: round, roundIndex } : prev)}
+          onNewHand={newHand}
+          onBack={() => setScreen('select')}
+          onOpenSettings={() => setShowSettings(true)}
+        />
+      )}
+
+      {screen === 'hand' && game && handState && !DEDICATED_HAND_GAMES.has(game.id) && (
         <HandBoard
           game={game}
           state={handState}

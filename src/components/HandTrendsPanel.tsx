@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { HandTrends, LoggedCaribbeanHand } from '../types/handLog'
-import { formatHandLine, formatHandTimestamp } from '../lib/handLogService'
+import { formatHandLine, formatHandTimestamp, coachFollowed, formatShowdownStreak } from '../lib/handLogService'
 import { formatMoneyWithSymbol } from '../lib/money'
 
 interface HandTrendsPanelProps {
@@ -10,6 +10,7 @@ interface HandTrendsPanelProps {
   defaultCollapsed?: boolean
   onDeleteHand?: (id: string) => void
   onClearAll?: () => void
+  onOpenFullMetrics?: () => void
 }
 
 function PnlSparkline({ values }: { values: number[] }) {
@@ -46,6 +47,7 @@ export function HandTrendsPanel({
   defaultCollapsed = true,
   onDeleteHand,
   onClearAll,
+  onOpenFullMetrics,
 }: HandTrendsPanelProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   const pnlColor = trends.totalPnL >= 0 ? 'text-emerald-400' : 'text-red-400'
@@ -84,8 +86,16 @@ export function HandTrendsPanel({
               <div className="grid grid-cols-4 gap-1.5 mb-2">
                 <StatTile label="Raises" value={String(trends.raises)} />
                 <StatTile label="Folds" value={String(trends.folds)} />
-                <StatTile label="Dlr qualify" value={`${trends.dealerQualifyRate.toFixed(0)}%`} />
+                <StatTile label="Dlr qualify" value={`${trends.dealer.qualifyRate.toFixed(0)}%`} sub={`${trends.dealer.currentQualifyStreak}`} />
+                <StatTile label="Dlr streak" value={trends.dealer.currentDealerWinStreak} sub={formatShowdownStreak(trends.dealer.recentShowdownStreak.slice(0, 10))} />
+              </div>
+
+              <div className="grid grid-cols-4 gap-1.5 mb-2">
                 <StatTile label="Follow AI" value={`${trends.aiFollowRate.toFixed(0)}%`} />
+                <StatTile label="Dlr NQ" value={`${trends.dealer.noQualifyRate.toFixed(0)}%`} sub={`${trends.dealer.winsFromNoQual} wins`} />
+                <StatTile label="You win" value={`${trends.dealer.playerWinRateWhenQual.toFixed(0)}%`} sub="when qual" />
+                <StatTile label="Dlr wins" value={`${trends.dealer.dealerWinRateWhenQual.toFixed(0)}%`} sub={`= ${(trends.dealer.playerWinRateWhenQual + trends.dealer.dealerWinRateWhenQual).toFixed(0)}%`} />
+                <StatTile label="Showdowns" value={String(trends.dealer.showdownHands)} />
               </div>
 
               {trends.recentPnL.length > 0 && (
@@ -107,9 +117,14 @@ export function HandTrendsPanel({
                     <p className="text-[9px] text-white/35 leading-tight">{formatHandTimestamp(h.createdAt)}</p>
                     <div className="flex items-center gap-1 text-xs text-white/60">
                       <span className="truncate flex-1">{formatHandLine(h)}</span>
-                      <span className={`shrink-0 ${h.followedAi ? 'text-emerald-500/70' : 'text-amber-500/70'}`}>
-                        {h.followedAi ? '✓AI' : '≠AI'}
+                      <span className={`shrink-0 ${coachFollowed(h) ? 'text-emerald-500/70' : 'text-amber-500/70'}`}>
+                        {coachFollowed(h) ? '✓AI' : '≠AI'}
                       </span>
+                      {h.action === 'raise' && h.dealerCards.length >= 5 && (
+                        <span className={`shrink-0 text-[9px] ${h.dealerQualified ? 'text-amber-400/60' : 'text-sky-400/60'}`}>
+                          {h.dealerQualified ? 'Q' : 'NQ'}
+                        </span>
+                      )}
                       {onDeleteHand && (
                         <button
                           type="button"
@@ -124,6 +139,16 @@ export function HandTrendsPanel({
                   </div>
                 ))}
               </div>
+
+              {onOpenFullMetrics && hands.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onOpenFullMetrics}
+                  className="mb-2 w-full py-2 rounded-lg text-xs font-semibold text-gold bg-gold/10 border border-gold/30 hover:bg-gold/20"
+                >
+                  View full metrics &amp; AI tweaks →
+                </button>
+              )}
 
               {onClearAll && hands.length > 0 && (
                 <button

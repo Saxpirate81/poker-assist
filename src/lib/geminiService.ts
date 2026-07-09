@@ -2,6 +2,8 @@ import type { AiAdvice, Card } from '../types/poker'
 import { getGeminiApiKey } from './config'
 import { formatCardDisplay } from './pokerEval'
 import { minCardsForContext, parseVisionResponse, countDealerHoles } from './photoCardMapping'
+import { parseRulesVisionResponse } from './rulesPhotoMapping'
+import type { ParsedRulesFromPhoto } from '../types/gameRulesKnowledge'
 
 export type PhotoReadContext = 'dealer-up' | 'player-hand' | 'table' | 'dealer-rest'
 
@@ -346,16 +348,95 @@ export function buildCaribbeanPrompt(params: {
   ante: number
   raiseAmt: number
   raiseMult: number
+  tableRulesContext?: string
 }): string {
+  const rulesBlock = params.tableRulesContext
+    ? `\n\nTABLE-SPECIFIC RULES (follow these over generic defaults):\n${params.tableRulesContext}\n`
+    : ''
+
   return `You are an expert Caribbean Stud poker coach. Analyze this hand and recommend the optimal play to maximize EV.
 
 Dealer up-card: ${params.dealerUp}
 Player cards: ${params.playerCards}
 Ante: $${params.ante}
 Raise: ${params.raiseMult}× ante = $${params.raiseAmt}
-
-Caribbean Stud rules: Raise with pair+, or Ace-high with J+ kicker when matching dealer up-card. Dealer qualifies with A-K.
+${rulesBlock}
+Caribbean Stud baseline: Raise with pair+, or Ace-high with J+ kicker when matching dealer up-card. Always max raise when raising.
 
 Respond ONLY with valid JSON (no markdown):
 {"verdict":"good|bad|neutral|warning","headline":"short with $ amount","detail":"1-2 sentences","recommendedAction":"Raise $X or Fold","betAmount":number_or_0,"confidence":0.0-1.0,"urgent":true}`
+}
+
+export function buildRulesVisionPrompt(gameId: string, gameName: string): string {
+  const gameHints: Record<string, string> = {
+    'caribbean-stud': 'Look for: ante amount, raise multiplier (2×/3×), dealer qualification (A-K or pair+), ante bonus pay table, progressive jackpot side bet.',
+    'three-card-poker': 'Look for: ante, play bet multiplier, Pair Plus side bet pay table, dealer qualifies Queen-high or better, Q-6-4 strategy.',
+    'video-poker': 'Look for: bet denominations, Jacks or Better / Deuces Wild pay table, max coins bonus for royal flush.',
+    'texas-holdem': 'Look for: blind amounts, betting structure (no-limit/limit), rake, table stakes.',
+    'omaha': 'Look for: blind amounts, pot-limit vs no-limit, must use exactly 2 hole + 3 board cards.',
+  }
+
+  return `You are reading a casino ${gameName} rules sign, pay table, or felt layout photo.
+
+Extract ALL visible rules, payouts, and strategy-relevant details for game id "${gameId}".
+${gameHints[gameId] ?? 'Extract any betting limits, pay tables, and house rules.'}
+
+Return ONLY valid JSON (no markdown):
+{
+  "rulesSummary": ["how to play bullet 1", "bullet 2"],
+  "strategyTips": ["optimal play tip 1", "tip 2"],
+  "aiCoachNotes": ["house quirk or edge case for AI coach"],
+  "settingOverrides": {"ante": 5, "raiseMultiplier": "2"},
+  "dealerQualifyRule": "dealer must have ...",
+  "payTableNotes": "Royal Flush 250:1, Full House 7:1, ...",
+  "extractSummary": "one sentence of what you read",
+  "confidence": 0.0-1.0
+}
+
+Rules:
+- settingOverrides: only include values clearly visible (ante, raiseMultiplier, playMultiplier, bet, smallBlind, bigBlind, progressiveJackpot).
+- Use numbers/strings exactly as shown on the sign.
+- strategyTips should maximize player EV given THIS table's rules.
+- If text is blurry, return partial results with lower confidence.`
+}
+
+export async function recognizeRulesFromPhotoGemini(
+  imageBase64: string,
+  gameId: string,
+  gameName: string
+): Promise<{ parsed: ParsedRulesFromPhoto | null; error?: string }> {
+  const apiKey = getGeminiApiKey()
+  if (!apiKey) {
+    return { parsed: null, error: 'Add Gemini API key in ⚙️ Settings for rules photo read.' }
+  }
+
+  const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1]! : imageBase64
+  const mimeMatch = imageBase64.match(/^data:(image\/[a-z+]+);/i)
+  const mime = mimeMatch?.[1] === 'image/png' ? 'image/png' : 'image/jpeg'
+  const prompt = buildRulesVisionPrompt(gameId, gameName)
+
+  for (const model of GEMINI_MODELS) {
+    const result = await callGeminiGenerate(apiKey, model, {
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inline_data: { mime_type: mime, data: base64Data } },
+        ],
+      }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 2000 },
+    })
+
+    if (!result.ok) {
+      if (result.error?.includes('API key') || result.error?.includes('403')) {
+        return { parsed: null, error: result.error }
+      }
+      if (shouldTryNextModel(result.status, result.error)) continue
+      return { parsed: null, error: result.error ?? 'Gemini rules vision failed' }
+    }
+
+    const parsed = parseRulesVisionResponse(result.text)
+    if (parsed) return { parsed }
+  }
+
+  return { parsed: null, error: 'Could not parse rules from photo. Try a clearer shot of the pay table or rules sign.' }
 }

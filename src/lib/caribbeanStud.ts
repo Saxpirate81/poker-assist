@@ -54,7 +54,7 @@ export function loadCaribbeanSession(): CaribbeanSession {
     if (raw) return JSON.parse(raw) as CaribbeanSession
   } catch { /* ignore */ }
   return {
-    bankroll: 500,
+    bankroll: 0,
     handsPlayed: 0,
     raises: 0,
     folds: 0,

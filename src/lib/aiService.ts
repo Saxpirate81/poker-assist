@@ -1,11 +1,7 @@
 import type { AiAdvice, BettingRound, Card, GameRuleSetting, HandState } from '../types/poker'
 import type { PokerGame } from '../types/poker'
-import {
-  evaluateHand,
-  evaluateThreeCard,
-  meetsThreeCardPlayThreshold,
-  rankValue,
-} from './pokerEval'
+import type { GameRulesKnowledge, ParsedRulesFromPhoto } from '../types/gameRulesKnowledge'
+import { evaluateHand, evaluateThreeCard, evaluateOmahaBestHand, meetsThreeCardPlayThreshold, rankValue } from './pokerEval'
 import {
   getCommunityCards,
   getPlayerCards,
@@ -16,8 +12,10 @@ import {
 import { getRaiseReason, shouldCaribbeanRaise } from './caribbeanFlow'
 import { formatMoneyWithSymbol } from './money'
 import { getAiProvider, getOpenAiApiKey, setOpenAiApiKey } from './config'
-import { buildCaribbeanPrompt, getGeminiAdvice, recognizeCardsFromPhotoGemini, type PhotoReadContext, type PhotoReadOptions } from './geminiService'
+import { buildCaribbeanPrompt, buildRulesVisionPrompt, getGeminiAdvice, recognizeCardsFromPhotoGemini, recognizeRulesFromPhotoGemini, type PhotoReadContext, type PhotoReadOptions } from './geminiService'
 import { parseVisionResponse } from './photoCardMapping'
+import { parseRulesVisionResponse } from './rulesPhotoMapping'
+import { buildAiRulesContext } from './rulesService'
 
 export function getApiKey(): string {
   return getOpenAiApiKey()
@@ -304,8 +302,10 @@ function holdemAdvice(
   }
 
   const allCards = [...hole, ...community]
-  if (community.length >= 3 && allCards.length >= 5 && ready) {
-    const best = evaluateHand(allCards)
+  if (community.length >= 3 && ready) {
+    const best = gameId === 'omaha' && hole.length === 4
+      ? evaluateOmahaBestHand(hole, community)
+      : allCards.length >= 5 ? evaluateHand(allCards) : null
     const potBet = bb * Math.max(2, community.length)
 
     if (best && best.score >= 200) {
@@ -363,10 +363,14 @@ function holdemAdvice(
 export async function getAiAdvice(
   game: PokerGame,
   state: HandState,
-  rules: GameRuleSetting[]
+  rules: GameRuleSetting[],
+  rulesKnowledge?: GameRulesKnowledge
 ): Promise<AiAdvice & { provider?: string }> {
   const baseline = getRuleBasedAdvice(game, state, rules)
   const provider = getAiProvider()
+  const tableRulesContext = rulesKnowledge
+    ? buildAiRulesContext(game, rules, rulesKnowledge)
+    : undefined
 
   if (game.id === 'caribbean-stud' && provider === 'gemini') {
     const playerCards = getPlayerCards(state, game)
@@ -382,6 +386,7 @@ export async function getAiAdvice(
         ante,
         raiseAmt,
         raiseMult,
+        tableRulesContext,
       })
       const gemini = await getGeminiAdvice(prompt)
       if (gemini) {
@@ -408,11 +413,13 @@ export async function getAiAdvice(
         const playerCards = getPlayerCards(state, game)
         const community = getCommunityCards(state, game)
         const dealerUp = state.cards['d1']
-        const prompt = `You are an expert poker coach. Game: ${game.name}. Round: ${state.currentRound}.
+        const prompt = `You are an expert poker coach optimizing for maximum EV on THIS table.
+
+${tableRulesContext ? `TABLE RULES:\n${tableRulesContext}\n\n` : ''}Game: ${game.name}. Round: ${state.currentRound}.
 Player cards: ${playerCards.map(c => `${c.rank}${c.suit[0]}`).join(', ') || 'none'}
 Dealer up-card: ${dealerUp ? `${dealerUp.rank}${dealerUp.suit[0]}` : 'none'}
 Community: ${community.map(c => `${c.rank}${c.suit[0]}`).join(', ') || 'none'}
-Rules: ${JSON.stringify(rules.map(r => ({ [r.id]: r.value })))}
+Settings: ${JSON.stringify(rules.map(r => ({ [r.id]: r.value })))}
 
 Respond ONLY with JSON: {"verdict":"good|bad|neutral|warning","headline":"short","detail":"1-2 sentences","recommendedAction":"Raise $X or Fold","betAmount":number_or_0,"confidence":0.0-1.0,"urgent":true}`
 
@@ -522,5 +529,49 @@ export async function recognizeCardsFromPhoto(
     return { cards: parsed.flat, parsed }
   } catch (e) {
     return { cards: [], parsed: emptyParsed, error: e instanceof Error ? e.message : 'Recognition failed' }
+  }
+}
+
+export async function recognizeRulesFromPhoto(
+  imageBase64: string,
+  gameId: string,
+  gameName: string
+): Promise<{ parsed: ParsedRulesFromPhoto | null; error?: string }> {
+  const gemini = await recognizeRulesFromPhotoGemini(imageBase64, gameId, gameName)
+  if (gemini.parsed) return gemini
+
+  const apiKey = getOpenAiApiKey()
+  if (!apiKey) return gemini
+
+  try {
+    const prompt = buildRulesVisionPrompt(gameId, gameName)
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: imageBase64 } },
+          ],
+        }],
+        max_tokens: 2000,
+        temperature: 0.1,
+      }),
+    })
+
+    if (!res.ok) {
+      return { parsed: null, error: gemini.error ?? `Vision API error: ${res.status}` }
+    }
+
+    const data = await res.json()
+    const content = data.choices?.[0]?.message?.content ?? ''
+    const parsed = parseRulesVisionResponse(content)
+    if (parsed) return { parsed }
+    return { parsed: null, error: gemini.error ?? 'Could not parse rules from photo.' }
+  } catch (e) {
+    return { parsed: null, error: e instanceof Error ? e.message : 'Rules photo read failed' }
   }
 }

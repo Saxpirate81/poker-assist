@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AiAdvice } from '../types/poker'
+import type { GameRulesKnowledge } from '../types/gameRulesKnowledge'
 import { getAiAdvice } from '../lib/aiService'
 import type { HandState } from '../types/poker'
 import type { PokerGame } from '../types/poker'
@@ -10,6 +11,7 @@ interface AiAssistantProps {
   game: PokerGame
   state: HandState
   rules: GameRuleSetting[]
+  rulesKnowledge?: GameRulesKnowledge
   onApplyBet?: (amount: number) => void
 }
 
@@ -20,20 +22,23 @@ const VERDICT_STYLES: Record<AiAdvice['verdict'], { bg: string; icon: string; bo
   warning: { bg: 'from-amber-900/90 to-amber-950/90', icon: '⚠️', border: 'border-amber-400/60', glow: 'shadow-amber-500/30' },
 }
 
-export function AiAssistant({ game, state, rules, onApplyBet }: AiAssistantProps) {
+export function AiAssistant({ game, state, rules, rulesKnowledge, onApplyBet }: AiAssistantProps) {
   const [advice, setAdvice] = useState<AiAdvice | null>(null)
   const [loading, setLoading] = useState(false)
   const [flash, setFlash] = useState(false)
   const prevHeadline = useRef<string>('')
   const fingerprint = cardsFingerprint(state.cards)
   const rulesKey = rules.map(r => `${r.id}:${r.value}`).join('|')
+  const knowledgeKey = rulesKnowledge
+    ? `${rulesKnowledge.updatedAt}:${rulesKnowledge.source}:${rulesKnowledge.strategyTips.length}`
+    : ''
   const ready = hasEnoughCardsForAdvice(state, game)
 
   useEffect(() => {
     let cancelled = false
     const timer = setTimeout(() => {
       setLoading(true)
-      getAiAdvice(game, state, rules).then(a => {
+      getAiAdvice(game, state, rules, rulesKnowledge).then(a => {
         if (!cancelled) {
           if (a.headline !== prevHeadline.current) {
             setFlash(true)
@@ -50,7 +55,7 @@ export function AiAssistant({ game, state, rules, onApplyBet }: AiAssistantProps
       cancelled = true
       clearTimeout(timer)
     }
-  }, [game, fingerprint, rulesKey, state.currentRound, ready])
+  }, [game, fingerprint, rulesKey, knowledgeKey, state.currentRound, ready, rulesKnowledge])
 
   if (!advice && loading) {
     return (

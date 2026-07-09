@@ -1,5 +1,6 @@
 import type { AiAdvice } from '../types/poker'
 import type { CaribbeanBetAnalysis } from '../lib/caribbeanOdds'
+import { aiAdviceSaysRaise } from '../lib/handLogService'
 import { formatMoneyWithSymbol } from '../lib/money'
 import { getAiProvider, getGeminiApiKey, isSupabaseConfigured } from '../lib/config'
 
@@ -16,16 +17,12 @@ interface CaribbeanAnalysisBarProps {
 
 function aiSaysFold(advice: AiAdvice | null): boolean {
   if (!advice) return false
-  if (advice.betAmount !== undefined && advice.betAmount > 0) return false
-  if (advice.verdict === 'bad') return true
-  if (/fold/i.test(advice.recommendedAction ?? '')) return true
-  if (/fold/i.test(advice.headline ?? '')) return true
-  return false
+  return !aiAdviceSaysRaise(advice)
 }
 
 function aiSaysRaise(advice: AiAdvice | null): boolean {
   if (!advice) return false
-  return !!(advice.betAmount && advice.betAmount > 0)
+  return aiAdviceSaysRaise(advice)
 }
 
 /** Coach certainty — not the same as win probability. */

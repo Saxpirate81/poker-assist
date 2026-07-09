@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Card, GameRuleSetting, HandState, AiAdvice } from '../types/poker'
 import type { PokerGame } from '../types/poker'
 import type { LoggedCaribbeanHand } from '../types/handLog'
+import type { GameRulesKnowledge } from '../types/gameRulesKnowledge'
 import { PlayingCard, CardBack } from './PlayingCard'
 import { CardPicker } from './CardPicker'
 import { CaribbeanAnalysisBar } from './CaribbeanAnalysisBar'
@@ -9,6 +10,8 @@ import { PhotoCapture } from './PhotoCapture'
 import { InlineBetStrip } from './InlineBetStrip'
 import { CaribbeanSessionBar } from './CaribbeanSessionBar'
 import { HandTrendsPanel } from './HandTrendsPanel'
+import { MetricsDashboard } from './MetricsDashboard'
+import { TableRulesPanel } from './TableRulesPanel'
 import { evaluateHand, formatRankDisplay } from '../lib/pokerEval'
 import { getSuggestedBetAmount, ruleValue } from '../lib/handUtils'
 import { getAiAdvice } from '../lib/aiService'
@@ -31,20 +34,24 @@ import { getCaribbeanStep, getRaiseReason, shouldCaribbeanRaise, type CaribbeanS
 import { analyzeCaribbeanBet } from '../lib/caribbeanOdds'
 import {
   computeTrends,
-  didFollowAi,
   fetchCaribbeanHands,
   saveCaribbeanHand,
   deleteCaribbeanHand,
   clearAllCaribbeanHands,
   rebuildSessionFromHands,
+  didFollowCoach,
 } from '../lib/handLogService'
+import { getRuleBasedAdvice } from '../lib/aiService'
+import { adjustActualBankroll, getDisplayBankroll } from '../lib/bankrollConfig'
 
 interface CaribbeanHandViewProps {
   game: PokerGame
   state: HandState
   rules: GameRuleSetting[]
+  rulesKnowledge: GameRulesKnowledge
   onUpdateCards: (cards: Record<string, Card | null>) => void
   onUpdateRules: (rules: GameRuleSetting[]) => void
+  onKnowledgeChange: (knowledge: GameRulesKnowledge) => void
   onNewHand: () => void
   onBack: () => void
   onOpenSettings?: () => void
@@ -62,8 +69,10 @@ export function CaribbeanHandView({
   game,
   state,
   rules,
+  rulesKnowledge,
   onUpdateCards,
   onUpdateRules,
+  onKnowledgeChange,
   onNewHand,
   onBack,
   onOpenSettings,
@@ -78,6 +87,8 @@ export function CaribbeanHandView({
   const [photoRefresh, setPhotoRefresh] = useState(0)
   const [validationError, setValidationError] = useState<string | null>(null)
   const [showStats, setShowStats] = useState(false)
+  const [showRules, setShowRules] = useState(false)
+  const [showFullMetrics, setShowFullMetrics] = useState(false)
   const scoredRef = useRef(false)
   const aiFetchedForHand = useRef(false)
 
@@ -118,7 +129,13 @@ export function CaribbeanHandView({
     : null
 
   useEffect(() => { saveCaribbeanSession(session) }, [session])
-  useEffect(() => { fetchCaribbeanHands().then(setLoggedHands) }, [])
+  useEffect(() => {
+    fetchCaribbeanHands().then(hands => {
+      setLoggedHands(hands)
+      if (hands.length > 0) setSession(rebuildSessionFromHands(hands))
+      else setSession(prev => ({ ...prev, bankroll: getDisplayBankroll(prev.netPnL) }))
+    })
+  }, [])
   useEffect(() => {
     if (step === 'done') setShowStats(true)
   }, [step])
@@ -135,7 +152,7 @@ export function CaribbeanHandView({
 
     aiFetchedForHand.current = true
     setAiLoading(true)
-    getAiAdvice(game, aiState, rules).then(advice => {
+    getAiAdvice(game, aiState, rules, rulesKnowledge).then(advice => {
       setLastAiAdvice(advice)
       setAiLoading(false)
     })
@@ -166,8 +183,8 @@ export function CaribbeanHandView({
     const dealerEval = allDealer.length === 5 ? evaluateHand(allDealer) : null
     setResultText(outcome.summary)
 
-    const advice = lastAiAdvice
-    const followed = didFollowAi(advice, action)
+    const advice = lastAiAdvice ?? getRuleBasedAdvice(game, aiState, rules)
+    const followed = didFollowCoach(action, playerCards, dealerUp, advice)
 
     await saveCaribbeanHand({
       dealerUpCard: dealerUp,
@@ -181,7 +198,7 @@ export function CaribbeanHandView({
       progressiveBet: progressive,
       action,
       aiAdvice: advice,
-      aiProvider: advice?.provider ?? getAiProvider(),
+      aiProvider: lastAiAdvice?.provider ?? getAiProvider(),
       followedAi: followed,
       netResult: outcome.netResult,
       outcomeSummary: outcome.summary,
@@ -192,18 +209,23 @@ export function CaribbeanHandView({
     const hands = await fetchCaribbeanHands()
     setLoggedHands(hands)
 
-    setSession(prev => ({
-      ...prev,
-      handsPlayed: prev.handsPlayed + 1,
-      raises: action === 'raise' ? prev.raises + 1 : prev.raises,
-      folds: action === 'fold' ? prev.folds + 1 : prev.folds,
-      wins: outcome.outcomeType === 'win' || outcome.outcomeType === 'dealer_no_qualify'
-        ? prev.wins + 1
-        : prev.wins,
-      losses: outcome.outcomeType === 'loss' ? prev.losses + 1 : prev.losses,
-      netPnL: prev.netPnL + outcome.netResult,
-      bankroll: prev.bankroll + outcome.netResult,
-    }))
+    adjustActualBankroll(outcome.netResult)
+
+    setSession(prev => {
+      const newNetPnL = prev.netPnL + outcome.netResult
+      return {
+        ...prev,
+        handsPlayed: prev.handsPlayed + 1,
+        raises: action === 'raise' ? prev.raises + 1 : prev.raises,
+        folds: action === 'fold' ? prev.folds + 1 : prev.folds,
+        wins: outcome.outcomeType === 'win' || outcome.outcomeType === 'dealer_no_qualify'
+          ? prev.wins + 1
+          : prev.wins,
+        losses: outcome.outcomeType === 'loss' ? prev.losses + 1 : prev.losses,
+        netPnL: newNetPnL,
+        bankroll: getDisplayBankroll(newNetPnL),
+      }
+    })
   }
 
   const handleBet = (action: 'raise' | 'fold') => {
@@ -305,6 +327,9 @@ export function CaribbeanHandView({
 
   return (
     <>
+      {showFullMetrics && (
+        <MetricsDashboard onClose={() => setShowFullMetrics(false)} initialGameId="caribbean-stud" />
+      )}
       <div className="caribbean-shell fixed inset-0 z-30 flex justify-center overflow-hidden">
         <div className="w-full max-w-lg h-full flex flex-col overflow-hidden px-3 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
           {/* Header */}
@@ -313,6 +338,13 @@ export function CaribbeanHandView({
               <button type="button" onClick={onBack} className="text-sm text-white/50 hover:text-white shrink-0">← Exit</button>
               <span className="text-sm font-bold truncate">🏝️ Caribbean Stud</span>
               <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowRules(s => !s)}
+                  className={`px-2 py-1 rounded-lg text-xs font-semibold ${showRules ? 'bg-gold/20 text-gold' : 'text-white/50 hover:text-white/80'}`}
+                >
+                  Rules
+                </button>
                 <button
                   type="button"
                   onClick={() => setShowStats(s => !s)}
@@ -327,6 +359,16 @@ export function CaribbeanHandView({
               </div>
             </div>
             <CaribbeanSessionBar session={session} compact />
+            {showRules && (
+              <TableRulesPanel
+                game={game}
+                rules={rules}
+                knowledge={rulesKnowledge}
+                onKnowledgeChange={onKnowledgeChange}
+                onRulesChange={onUpdateRules}
+                compact
+              />
+            )}
             {showStats && (
               <HandTrendsPanel
                 hands={loggedHands}
@@ -335,6 +377,7 @@ export function CaribbeanHandView({
                 defaultCollapsed={step !== 'done'}
                 onDeleteHand={handleDeleteHand}
                 onClearAll={handleClearAllHands}
+                onOpenFullMetrics={() => setShowFullMetrics(true)}
               />
             )}
             <div className={`py-1.5 px-2.5 rounded-lg text-center border ${bannerAlert ? 'bg-red-950/70 border-red-500/40' : 'bg-gold/15 border-gold/40'}`}>
