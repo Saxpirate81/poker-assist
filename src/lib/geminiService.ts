@@ -12,12 +12,27 @@ export interface PhotoReadOptions {
   knownDealerUp?: Card | null
 }
 
-/** Primary + fallbacks — 1.5 retired; 2.5 Flash first, 2.0 last resort. */
+/** Vision + coach — 2.5/2.0/1.5 shut down on Google AI API; use Gemini 3.x. */
 const GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-2.0-flash',
+  'gemini-3.5-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-3-flash-preview',
+  'gemini-flash-latest',
 ] as const
+
+function visionGenerationConfig(context: PhotoReadContext, model: string): Record<string, unknown> {
+  const config: Record<string, unknown> = {
+    temperature: 0.1,
+    maxOutputTokens: context === 'table' ? 1200 : 1000,
+  }
+  // Minimize thinking latency for deterministic JSON card reads
+  if (model.startsWith('gemini-3')) {
+    config.thinkingConfig = { thinkingLevel: 'low' }
+  } else if (model.startsWith('gemini-2.5')) {
+    config.thinkingConfig = { thinkingBudget: 0 }
+  }
+  return config
+}
 
 function geminiUrl(model: string, apiKey: string): string {
   return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
@@ -237,13 +252,7 @@ async function callGeminiVision(
   mime: string,
   context: PhotoReadContext
 ): Promise<{ cards: Card[]; parsed: ReturnType<typeof parseVisionResponse>; error?: string; status: number }> {
-  const generationConfig: Record<string, unknown> = {
-    temperature: 0.1,
-    maxOutputTokens: context === 'table' ? 1200 : 1000,
-  }
-  if (model.startsWith('gemini-2.5')) {
-    generationConfig.thinkingConfig = { thinkingBudget: 0 }
-  }
+  const generationConfig = visionGenerationConfig(context, model)
 
   const result = await callGeminiGenerate(apiKey, model, {
     contents: [{
@@ -380,16 +389,20 @@ export async function recognizeCardsFromPhotoGemini(
     return { cards: best.cards, parsed: best.parsed }
   }
 
-  return {
-    cards: [],
-    parsed: { dealerUp: null, playerCards: [], dealerHoleCards: [], flat: [] },
-    error: lastError.includes('Could not read') || lastError.includes('Empty response')
+  const fallbackMsg = isModelUnavailableError(lastError)
+    ? 'Gemini models were updated — hard refresh, then retry photo. Check ⚙️ Settings → Test Gemini if needed.'
+    : lastError.includes('Could not read') || lastError.includes('Empty response')
       ? lastError
       : best && best.cards.length > 0
         ? `Only found ${best.cards.length} card(s). Frame the full table and retry.`
         : lastError !== 'Gemini vision failed'
           ? lastError
-          : `Only found 0 card(s). Frame the full table and retry.`,
+          : `Only found 0 card(s). Frame the full table and retry.`
+
+  return {
+    cards: [],
+    parsed: { dealerUp: null, playerCards: [], dealerHoleCards: [], flat: [] },
+    error: fallbackMsg,
   }
 }
 
