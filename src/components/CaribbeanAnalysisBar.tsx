@@ -31,6 +31,10 @@ function coachConfidencePct(aiAdvice: AiAdvice | null, analysis: CaribbeanBetAna
   return Math.min(92, Math.max(50, Math.round(raw * 100)))
 }
 
+function stripCoachEmoji(text: string): string {
+  return text.replace(/^[\s✅✓☑️⛔❌⚠️]+/u, '').trim()
+}
+
 export function CaribbeanAnalysisBar({
   analysis,
   aiAdvice,
@@ -55,18 +59,20 @@ export function CaribbeanAnalysisBar({
 
   if (!analysis) return null
 
-  // Rules engine (analysis.recommend) drives green/red — avoids AI saying fold then flipping green.
+  // Rules engine drives color/icon — AI copy only when it agrees on raise vs fold.
   const isRaise = analysis.recommend === 'raise'
   const rulesHeadline = isRaise
     ? `Raise ${formatMoneyWithSymbol(raiseAmt)}`
     : 'FOLD — save your raise'
   const rulesDetail = analysis.reason
 
-  const aiAligned = isRaise ? aiSaysRaise(aiAdvice) : aiSaysFold(aiAdvice)
+  const aiMatchesCoach = isRaise ? aiSaysRaise(aiAdvice) : aiSaysFold(aiAdvice)
   const headline = loading
     ? 'Analyzing…'
-    : (aiAligned && aiAdvice?.headline ? aiAdvice.headline : rulesHeadline)
-  const detail = aiAligned && aiAdvice?.detail ? aiAdvice.detail : rulesDetail
+    : (aiMatchesCoach && aiAdvice?.headline
+      ? stripCoachEmoji(aiAdvice.headline)
+      : rulesHeadline)
+  const detail = aiMatchesCoach && aiAdvice?.detail ? aiAdvice.detail : rulesDetail
   const coachPct = coachConfidencePct(aiAdvice, analysis)
 
   return (
@@ -75,6 +81,7 @@ export function CaribbeanAnalysisBar({
         <div className="flex items-center gap-1.5 min-w-0">
           <span className={`shrink-0 ${dense ? 'text-base' : 'text-lg'}`}>{isRaise ? '✅' : '⛔'}</span>
           <div className="min-w-0">
+            <p className="text-[8px] uppercase tracking-wide text-white/40 leading-none mb-0.5">Coach says</p>
             <p className={`font-bold truncate ${dense ? 'text-xs' : 'text-sm'}`}>{headline}</p>
             {!dense && <p className="text-[10px] text-white/50 truncate">{detail}</p>}
           </div>

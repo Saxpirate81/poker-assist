@@ -68,11 +68,11 @@ function saveLocal(hands: LoggedCaribbeanHand[]): void {
 
 /** Whether stored AI advice recommends raise (matches CaribbeanAnalysisBar). */
 export function aiAdviceSaysRaise(advice: AiAdvice): boolean {
-  if (advice.betAmount !== undefined) return advice.betAmount > 0
-  if (advice.verdict === 'bad') return false
-  const text = `${advice.recommendedAction ?? ''} ${advice.headline ?? ''}`.toLowerCase()
+  const text = `${advice.recommendedAction ?? ''} ${advice.headline ?? ''} ${advice.detail ?? ''}`.toLowerCase()
   if (/\bfold\b/.test(text)) return false
   if (/\b(raise|max bet|play)\b/.test(text)) return true
+  if (advice.verdict === 'bad') return false
+  if (advice.betAmount !== undefined) return advice.betAmount > 0
   return false
 }
 

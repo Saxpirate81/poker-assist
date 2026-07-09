@@ -67,7 +67,6 @@ export function PhotoCapture({
         return
       }
       const playerMapped = slotIds.filter(id => id.startsWith('p') && mapping[id]).length
-      const dealerHoleMapped = ['d2', 'd3', 'd4', 'd5'].filter(id => mapping[id] || existingCards[id]).length
       const mergedDealer = { ...existingCards, ...mapping }
 
       if (context === 'table') {
@@ -96,10 +95,13 @@ export function PhotoCapture({
         onCardsDetected(mapping)
       }
       setSuccess(
-        `✓ ${n} card${n === 1 ? '' : 's'} loaded`
-        + (playerMapped > 0 ? ` (${playerMapped} player)` : '')
-        + (context === 'dealer-rest' ? ` (${['d2', 'd3', 'd4', 'd5'].filter(id => mergedDealer[id]).length}/4 hole)` : dealerHoleMapped > 0 ? ` (${dealerHoleMapped} dealer)` : '')
+        `📸 ${n} card${n === 1 ? '' : 's'} from photo`
+        + (playerMapped > 0 ? ` · ${playerMapped} yours` : '')
+        + (context === 'dealer-rest'
+          ? ` · ${['d2', 'd3', 'd4', 'd5'].filter(id => mergedDealer[id]).length}/4 dealer holes`
+          : mapping['d1'] && !hasDealerUp ? ' · dealer up' : '')
         + (warnings.length ? ` · ${warnings.length} dup skipped` : '')
+        + ' — coach below ↓'
       )
       setTimeout(() => setSuccess(null), 3000)
     } catch (e) {
@@ -146,7 +148,7 @@ export function PhotoCapture({
         )}
         {fileInput}
         {error && <p className="mt-1 text-xs text-red-400 text-center">{error}</p>}
-        {success && <p className="mt-1 text-xs text-emerald-400 font-medium text-center">{success}</p>}
+        {success && <p className="mt-1 text-xs text-sky-300/90 font-medium text-center">{success}</p>}
       </div>
     )
   }
@@ -169,7 +171,7 @@ export function PhotoCapture({
           {fileInput}
         </div>
         {error && <p className="mt-0.5 text-[10px] text-red-400 truncate">{error}</p>}
-        {success && <p className="mt-0.5 text-[10px] text-emerald-400 font-medium truncate">{success}</p>}
+        {success && <p className="mt-0.5 text-[10px] text-sky-300/90 font-medium truncate">{success}</p>}
       </div>
     )
   }
@@ -194,7 +196,7 @@ export function PhotoCapture({
         {fileInput}
       </div>
       {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
-      {success && <p className="mt-2 text-xs text-emerald-400 font-medium">{success}</p>}
+      {success && <p className="mt-2 text-xs text-sky-300/90 font-medium">{success}</p>}
     </div>
   )
 }

@@ -16,6 +16,7 @@ import { buildCaribbeanPrompt, buildRulesVisionPrompt, getGeminiAdvice, recogniz
 import { parseVisionResponse } from './photoCardMapping'
 import { parseRulesVisionResponse } from './rulesPhotoMapping'
 import { buildAiRulesContext } from './rulesService'
+import { aiAdviceSaysRaise } from './handLogService'
 
 export function getApiKey(): string {
   return getOpenAiApiKey()
@@ -392,7 +393,7 @@ export async function getAiAdvice(
       if (gemini) {
         const confidence = Math.min(0.92, Math.max(0.5, gemini.confidence ?? 0.8))
         const rulesRaise = shouldCaribbeanRaise(playerCards, dealerUp)
-        const geminiRaise = !!(gemini.betAmount && gemini.betAmount > 0)
+        const geminiRaise = aiAdviceSaysRaise(gemini)
         if (rulesRaise !== geminiRaise) {
           return {
             ...baseline,
@@ -401,7 +402,14 @@ export async function getAiAdvice(
             provider: 'gemini',
           }
         }
-        return { ...baseline, headline: gemini.headline ?? baseline.headline, detail: gemini.detail ?? baseline.detail, confidence, provider: 'gemini' }
+        const useGeminiCopy = geminiRaise === rulesRaise
+        return {
+          ...baseline,
+          headline: useGeminiCopy ? (gemini.headline ?? baseline.headline) : baseline.headline,
+          detail: useGeminiCopy ? (gemini.detail ?? baseline.detail) : baseline.detail,
+          confidence,
+          provider: 'gemini',
+        }
       }
     }
   }
@@ -442,7 +450,7 @@ Respond ONLY with JSON: {"verdict":"good|bad|neutral|warning","headline":"short"
             const parsed = JSON.parse(jsonMatch[0]) as AiAdvice
             const confidence = Math.min(0.92, Math.max(0.5, parsed.confidence ?? 0.8))
             const rulesRaise = shouldCaribbeanRaise(playerCards, dealerUp)
-            const aiRaise = !!(parsed.betAmount && parsed.betAmount > 0)
+            const aiRaise = aiAdviceSaysRaise(parsed)
             if (rulesRaise !== aiRaise) {
               return {
                 ...baseline,
@@ -451,10 +459,11 @@ Respond ONLY with JSON: {"verdict":"good|bad|neutral|warning","headline":"short"
                 provider: 'openai',
               }
             }
+            const useAiCopy = aiRaise === rulesRaise
             return {
               ...baseline,
-              headline: parsed.headline ?? baseline.headline,
-              detail: parsed.detail ?? baseline.detail,
+              headline: useAiCopy ? (parsed.headline ?? baseline.headline) : baseline.headline,
+              detail: useAiCopy ? (parsed.detail ?? baseline.detail) : baseline.detail,
               confidence,
               provider: 'openai',
             }
